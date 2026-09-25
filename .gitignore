@@ -1,0 +1,12 @@
+# Dados nunca vão para o repositório (hoje sintéticos, amanhã sensíveis pela LGPD)
+data/
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+# MLflow (Sprint 4)
+mlruns/
+mlflow.db
+# macOS
+.DS_Store

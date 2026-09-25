@@ -1,0 +1,110 @@
+# Contrato de dados · Painel de Equidade em Saúde do Recife
+
+> **O que é:** a lista exata de tabelas e colunas que o pipeline espera receber.
+> **Por que existe:** a Secretaria não liberou os dados reais do PEC. Tudo que vem depois da Estação 1 (limpeza, resumo, modelo, painel) lê **este formato**. Hoje quem o produz é o gerador sintético. No dia em que a Secretaria fizer a extração real neste formato, só a Estação 1 muda.
+> **Base de referência:** campos da Ficha de Cadastro Individual do e-SUS APS e a reunião com a Secretaria (01/09/2026). Os nomes das colunas são nossos (padrão `snake_case`), não os nomes internos do PEC.
+
+---
+
+## Visão geral
+
+| Tabela | Uma linha por | Papel |
+|---|---|---|
+| `territorio_equipes` | equipe de Saúde da Família | O "mapa" do Recife: distrito → unidade → equipe |
+| `fichas_cadastro` | ficha de cadastro enviada pelo ACS | A matéria-prima: cada cadastro novo ou atualização |
+
+**Por que "fichas" e não "pessoas":** no PEC, o ACS envia uma ficha a cada cadastro ou atualização. A qualidade de uma equipe num período se mede **pelas fichas que ela preencheu naquele período**, não pelo estoque acumulado de anos. Isso separa "como a equipe trabalha hoje" de "o que ficou do passado". Para a visão de concentração populacional, usa-se a **ficha mais recente de cada cidadão ativo**.
+
+---
+
+## Tabela 1 · `territorio_equipes`
+
+| Coluna | Tipo | Exemplo | Descrição |
+|---|---|---|---|
+| `ine` | texto (10 dígitos) | `0001234567` | Identificador Nacional de Equipe. Chave da tabela |
+| `nome_equipe` | texto | `ESF Ibura 03` | Nome da equipe |
+| `cnes` | texto (7 dígitos) | `0001234` | Código da unidade de saúde no CNES |
+| `nome_unidade` | texto | `USF Ibura de Baixo` | Nome da unidade |
+| `distrito_sanitario` | inteiro 1 a 8 | `8` | Distrito Sanitário do Recife |
+| `bairro` | texto | `Ibura` | Bairro da unidade |
+| `origem` | texto | `cnes` ou `sintetico` | Se a equipe veio do CNES real ou foi inventada |
+
+## Tabela 2 · `fichas_cadastro`
+
+### Identificação e tempo
+| Coluna | Tipo | Valores | Descrição |
+|---|---|---|---|
+| `id_ficha` | inteiro | | Chave da tabela |
+| `id_cidadao` | texto | `c0000001` | **Pseudônimo.** Nunca nome, CPF ou CNS |
+| `ine` | texto | | Equipe que enviou a ficha (liga com a Tabela 1) |
+| `data_ficha` | data | `2026-03-14` | Data de envio da ficha |
+| `tipo_ficha` | texto | `novo`, `atualizacao` | Primeiro cadastro ou atualização |
+| `situacao` | texto | `ativo`, `mudou_se`, `obito` | Situação do cadastro após esta ficha |
+
+### Perfil
+| Coluna | Tipo | Valores | Descrição |
+|---|---|---|---|
+| `idade` | inteiro | 0 a 110 | Idade na data da ficha (a extração real traria a data de nascimento; guardamos só a idade) |
+| `sexo` | texto | `F`, `M` | Sexo informado no cadastro |
+| `nome_social` | booleano | | Se o campo nome social foi preenchido (o nome em si **não** é guardado) |
+
+### Marcadores de equidade
+
+Cada marcador pode estar em um de **três estados**, e a diferença entre eles é o centro do projeto:
+
+| Estado | Significa | Responsabilidade |
+|---|---|---|
+| **preenchido** | A pergunta foi feita e respondida | |
+| **recusou** | A pessoa disse que **não deseja informar** | Escolha da pessoa |
+| **não perguntado** | Campo vazio | **Falha da equipe** |
+
+| Coluna | Tipo | Valores | Observação |
+|---|---|---|---|
+| `raca_cor` | texto | `branca`, `preta`, `parda`, `amarela`, `indigena`, vazio | Padrão IBGE. Obrigatório no PEC, então o problema principal é **inconsistência** (valor errado), não campo vazio |
+| `tem_deficiencia` | texto | `sim`, `nao`, vazio | Obrigatório no PEC |
+| `tipo_deficiencia` | texto | `auditiva`, `visual`, `intelectual`, `fisica`, `outra`, vazio | Só quando `tem_deficiencia = sim`. Se houver mais de uma, separadas por `;` |
+| `deseja_informar_os` | texto | `sim`, `nao`, vazio | **"Deseja informar orientação sexual?"** `nao` = recusou · vazio = não perguntado |
+| `orientacao_sexual` | texto | `heterossexual`, `gay`, `lesbica`, `bissexual`, `assexual`, `pansexual`, `outra`, vazio | Só quando `deseja_informar_os = sim` |
+| `deseja_informar_ig` | texto | `sim`, `nao`, vazio | **"Deseja informar identidade de gênero?"** Mesma lógica |
+| `identidade_genero` | texto | `mulher_cis`, `homem_cis`, `mulher_trans`, `homem_trans`, `travesti`, `nao_binario`, `outra`, vazio | Só quando `deseja_informar_ig = sim` |
+
+---
+
+## Regras de negócio (vêm da reunião de 01/09)
+
+1. **Crianças de 0 a 10 anos** ficam fora da análise de orientação sexual e identidade de gênero (decisão de gestão da Secretaria).
+2. **Escopo:** só Atenção Básica. Serviço de Atenção Domiciliar e ambulatórios ficam fora.
+3. **Nenhum dado individual aparece no painel.** Tudo é agregado por equipe, unidade ou distrito.
+
+## Como a qualidade vira número (usado nas Estações 3 e 4)
+
+**Índice de completude da equipe no período (0 a 100):** média ponderada da % de fichas com cada marcador **preenchido**.
+
+| Marcador | Peso | Por quê |
+|---|---|---|
+| Raça/cor | 1 | Obrigatório, costuma estar preenchido |
+| Deficiência | 1 | Obrigatório, costuma estar preenchido |
+| Orientação sexual | 2 | Onde está o problema, segundo a cliente |
+| Identidade de gênero | 2 | Idem |
+
+**Equipe crítica:** índice entre os **25% piores** do quadrimestre. **Alvo do modelo:** a equipe vai estar crítica **no quadrimestre seguinte**?
+
+**Período:** quadrimestre (jan-abr, mai-ago, set-dez). A cliente disse que acompanhamento a cada 4 meses basta.
+
+---
+
+## Parâmetros da base sintética
+
+> Preenchido no Bloco 2, com a fonte de cada número. Separado entre **[real]** (fonte pública ou reunião) e **[hipótese]** (decisão nossa, a validar com dado real).
+
+| Parâmetro | Valor | Fonte |
+|---|---|---|
+| % que deseja informar orientação sexual | ~38% | [real] reunião 01/09, um exemplo de unidade |
+| Distritos Sanitários | 8 | [real] briefing |
+| Equipes de Saúde da Família | 384 | [real] briefing (a confirmar no CNES) |
+| *(demais parâmetros)* | | Bloco 2 |
+
+## Pontos a conferir quando houver dado real
+- Os valores exatos das listas de orientação sexual e identidade de gênero na versão do PEC em uso no Recife.
+- Se registros antigos/migrados trazem raça/cor e deficiência vazios apesar de serem obrigatórios hoje. `[inferência]`
+- 141 USF (briefing) × "mais de 200 unidades" (fala da cliente).
