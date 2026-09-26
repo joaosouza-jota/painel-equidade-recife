@@ -30,8 +30,11 @@ Rode o pipeline em ordem (a base inteira é recriada em menos de 1 minuto):
 python src/gerar_sintetico.py                                 # 1. gera território + fichas sintéticas
 python src/tratamento.py                                      # 2. padroniza e valida
 cd src && python features.py && python baseline.py && cd ..   # 3 e 4. base do modelo e baselines
+cd src && python preparar_painel.py && cd ..                  # agrega os dados do painel (app/dados)
 streamlit run app/app.py                                      # 5. abre o painel no navegador
 ```
+
+Para só abrir o painel, basta o último comando: os dados agregados que ele usa (`app/dados/`) já estão no repositório. O painel não lê nenhuma ficha individual, apenas contagens por equipe, USF e distrito.
 
 Os notebooks (`notebooks/01_eda.ipynb` e `02_baseline.ipynb`) já estão salvos com as saídas e podem ser reexecutados depois do passo 3.
 

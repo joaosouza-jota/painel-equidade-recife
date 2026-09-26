@@ -2,7 +2,8 @@
 Protótipo navegável do Painel de Equidade em Saúde (Estação 5).
 
 Segue os wireframes do Kickoff: uma tela por perfil (Coordenação, Gestão de Distrito, Equipe de Saúde).
-Lê os dados produzidos pelo pipeline (data/processed), não imagens.
+Lê só dados agregados por equipe, USF e distrito (app/dados, gerados por src/preparar_painel.py):
+nenhuma ficha individual chega ao painel.
 
 Protótipo: o perfil é escolhido na barra lateral (no produto, viria do login da Secretaria) e a previsão
 de risco usa a baseline de persistência (o modelo de ML entra no lugar dela na Sprint 1).
@@ -10,7 +11,6 @@ de risco usa a baseline de persistência (o modelo de ML entra no lugar dela na 
 Uso (na raiz do projeto):  streamlit run app/app.py
 """
 
-import sys
 from pathlib import Path
 
 import altair as alt
@@ -18,13 +18,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-RAIZ = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RAIZ / "src"))
-from indicadores import resumo_equipe_periodo  # noqa: E402
-from features import inconsistencia_raca  # noqa: E402
-
-PROCESSED = RAIZ / "data" / "processed"
-RAW = RAIZ / "data" / "raw"
+DADOS = Path(__file__).resolve().parent / "dados"
 
 AZUL, LARANJA, VERDE_AGUA, AMARELO = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 CATEGORICAS = [AZUL, LARANJA, VERDE_AGUA, AMARELO, "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
@@ -36,17 +30,12 @@ MARCADORES = {
     "Deficiência": "estado_deficiencia",
 }
 
-# Populações das políticas de equidade: filtro sobre a ficha mais recente + marcador que as registra
-POPULACOES = {
-    "Pessoas negras (pretas e pardas)": (lambda d: d["raca_cor"].isin(["preta", "parda"]), "estado_raca"),
-    "Pessoas trans e travestis": (lambda d: d["identidade_genero"].isin(["mulher_trans", "travesti", "homem_trans"]), "estado_ig"),
-    "Pessoas não binárias": (lambda d: d["identidade_genero"] == "nao_binario", "estado_ig"),
-    "Pessoas LGB+ (lésbicas, gays, bissexuais e outras)": (
-        lambda d: ~d["orientacao_sexual"].isin(["heterossexual", ""]), "estado_os"),
-    "Pessoas com deficiência": (lambda d: d["tem_deficiencia"] == "sim", "estado_deficiencia"),
-    "Pessoas com deficiência auditiva": (lambda d: d["tipo_deficiencia"].str.contains("auditiva"), "estado_deficiencia"),
-    "Pessoas com deficiência física": (lambda d: d["tipo_deficiencia"].str.contains("fisica"), "estado_deficiencia"),
-}
+# Nomes na mesma ordem de src/preparar_painel.py
+POPULACOES = [
+    "Pessoas negras (pretas e pardas)", "Pessoas trans e travestis", "Pessoas não binárias",
+    "Pessoas LGB+ (lésbicas, gays, bissexuais e outras)", "Pessoas com deficiência",
+    "Pessoas com deficiência auditiva", "Pessoas com deficiência física",
+]
 
 st.set_page_config(page_title="Painel de Equidade em Saúde", page_icon="📊", layout="wide")
 
@@ -55,31 +44,18 @@ st.set_page_config(page_title="Painel de Equidade em Saúde", page_icon="📊", 
 # Dados (carregados uma vez e guardados em cache)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner="Carregando dados do pipeline...")
+@st.cache_data(show_spinner="Carregando dados...")
 def carregar():
-    fichas = pd.read_parquet(PROCESSED / "fichas_tratadas.parquet")
-    territorio = pd.read_csv(RAW / "territorio_equipes.csv", dtype={"ine": str, "cnes": str})
-    resumo = resumo_equipe_periodo(fichas).merge(inconsistencia_raca(fichas), on=["ine", "quadrimestre"], how="left")
-    resumo = resumo.merge(territorio[["ine", "nome_equipe", "nome_unidade", "bairro"]], on="ine")
-    pct = resumo.groupby("quadrimestre")["indice_completude"].rank(pct=True)
-    resumo["status"] = pd.cut(pct, [0, 0.25, 0.40, 1], labels=["🔴 Crítica", "🟡 Atenção", "🟢 OK"], include_lowest=True).astype(str)
-    return fichas, territorio, resumo
-
-
-@st.cache_data(show_spinner="Calculando a população ativa...")
-def populacao_ativa(ate_quadrimestre):
-    """Ficha mais recente de cada pessoa até o quadrimestre, só de quem continua no território."""
-    fichas, _, _ = carregar()
-    f = fichas[fichas["quadrimestre"] <= ate_quadrimestre]
-    atual = f.sort_values("data_ficha").groupby("id_cidadao").tail(1)
-    return atual[atual["situacao"] == "ativo"]
+    return {nome: pd.read_parquet(DADOS / f"{nome}.parquet")
+            for nome in ["resumo_equipes", "estados_distrito", "populacao_usf", "territorio_usf"]}
 
 
 def pct(x):
     return f"{x * 100:.0f}%"
 
 
-fichas, territorio, resumo = carregar()
+dados = carregar()
+resumo = dados["resumo_equipes"]
 QUADRIMESTRES = sorted(resumo["quadrimestre"].unique())
 
 
@@ -101,7 +77,6 @@ with st.sidebar:
     quad = st.select_slider("Quadrimestre", QUADRIMESTRES, value=QUADRIMESTRES[-1])
 
 res_q = resumo[resumo["quadrimestre"] == quad]
-elegiveis_q = fichas[fichas["quadrimestre"] == quad]
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +93,6 @@ def tela_coordenacao():
         st.info("Selecione ao menos um distrito.")
         return
     r = res_q[res_q["distrito_sanitario"].isin(distritos)]
-    f = elegiveis_q[elegiveis_q["distrito_sanitario"].isin(distritos)]
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Equipes", len(r))
@@ -129,17 +103,11 @@ def tela_coordenacao():
     aba_pop, aba_qual = st.tabs(["📍 Onde está a população", "✅ Qualidade do registro"])
 
     with aba_pop:
-        grupo = st.selectbox("População", list(POPULACOES))
-        filtro, marcador = POPULACOES[grupo]
-        atual = populacao_ativa(quad)
-        atual = atual[atual["distrito_sanitario"].isin(distritos)]
-        por_usf = (atual.assign(no_grupo=filtro(atual), sem_pergunta=atual[marcador] == "nao_perguntado",
-                                elegivel=atual[marcador] != "nao_se_aplica")
-                   .groupby("cnes").agg(pessoas=("no_grupo", "sum"), elegiveis=("elegivel", "sum"),
-                                        sem_pergunta=("sem_pergunta", "sum")).reset_index())
+        grupo = st.selectbox("População", POPULACOES)
+        pop = dados["populacao_usf"]
+        por_usf = pop[(pop["quadrimestre"] == quad) & (pop["grupo"] == grupo) & pop["distrito_sanitario"].isin(distritos)]
+        por_usf = por_usf.drop(columns="distrito_sanitario").merge(dados["territorio_usf"], on="cnes")
         por_usf["% não perguntado"] = por_usf["sem_pergunta"] / por_usf["elegiveis"]
-        usf = territorio.drop_duplicates("cnes")[["cnes", "nome_unidade", "bairro", "distrito_sanitario", "latitude", "longitude"]]
-        por_usf = por_usf.merge(usf, on="cnes")
         por_usf["raio"] = 60 + 900 * (por_usf["pessoas"] / max(por_usf["pessoas"].max(), 1)) ** 0.5
         por_usf["nao_perg_txt"] = (por_usf["% não perguntado"] * 100).round(0).astype(int).astype(str) + "%"
 
@@ -167,9 +135,9 @@ def tela_coordenacao():
     with aba_qual:
         nome_marcador = st.radio("Marcador", list(MARCADORES), horizontal=True)
         col = MARCADORES[nome_marcador]
-        base = f[f[col] != "nao_se_aplica"]
-        estados = (base.groupby("distrito_sanitario")[col].value_counts(normalize=True).rename("pct").reset_index())
-        estados["estado"] = estados[col].map({"preenchido": "Preenchido", "recusou": "Recusou informar",
+        est = dados["estados_distrito"]
+        estados = est[(est["quadrimestre"] == quad) & (est["marcador"] == col) & est["distrito_sanitario"].isin(distritos)].copy()
+        estados["estado"] = estados["estado"].map({"preenchido": "Preenchido", "recusou": "Recusou informar",
                                               "nao_perguntado": "Não perguntado"})
         estados["distrito"] = "DS " + estados["distrito_sanitario"].astype(str)
         grafico = alt.Chart(estados).mark_bar(cornerRadiusEnd=3).encode(

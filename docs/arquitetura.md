@@ -33,8 +33,9 @@ flowchart LR
     A2 -.-> B
     A3 --> A1
     B --> C1 --> C2 --> D1 --> D2
-    C1 --> F
-    D1 -- "risco no próximo quadrimestre" --> F
+    C1 --> G["Agregação para o painel ✅<br/>só contagens, sem ficha individual<br/>src/preparar_painel.py"]
+    D1 -- "risco no próximo quadrimestre" --> G
+    G --> F
 ```
 
 ## As estações
@@ -45,7 +46,8 @@ flowchart LR
 | 2 | **Tratamento** | fichas brutas | `data/processed/fichas_tratadas.parquet` + relatório de problemas | ✅ |
 | 3 | **Indicadores e variáveis** | fichas tratadas | índice por equipe x quadrimestre; `data/processed/base_modelo.parquet` | ✅ |
 | 4 | **Modelo** | base do modelo | baselines (`notebooks/resultados/baseline.csv`); modelos e experimentos | ✅ baseline · 🔜 modelos |
-| 5 | **Painel** | fichas tratadas, indicadores, previsão | protótipo navegável com 3 perfis | ✅ protótipo · 🔜 dashboard final (Sprint 3) |
+| 4→5 | **Agregação para o painel** | fichas tratadas, indicadores | `app/dados/*.parquet` (~300 KB, só contagens por equipe, USF e distrito) | ✅ |
+| 5 | **Painel** | `app/dados/` | protótipo navegável com 3 perfis, publicado no Streamlit Community Cloud | ✅ protótipo · 🔜 dashboard final (Sprint 3) |
 
 ## Decisões de arquitetura (e por quê)
 
@@ -59,6 +61,7 @@ flowchart LR
 | **Divisão treino/teste temporal** | Sortear linhas deixaria o modelo aprender com o futuro de uma equipe para prever o passado dela |
 | **Arquivos Parquet em disco entre as estações** | Simples, rápido e reproduzível: cada etapa pode ser rodada e inspecionada sozinha. Banco de dados entra se a extração real exigir |
 | **Semente fixa no gerador** | Rodar de novo gera exatamente a mesma base: qualquer resultado pode ser reproduzido |
+| **Painel lê só dados agregados** (`preparar_painel.py`) | Privacidade (o painel nunca toca em ficha de pessoa) e leveza: ~300 KB em vez de 770 mil fichas, o que reduziu a memória do painel de ~2 GB para ~250 MB e permitiu publicá-lo na nuvem |
 | **Nenhum dado individual no painel** | Raça, orientação sexual, identidade de gênero e deficiência são dados sensíveis (LGPD, art. 5º, II). Tudo é agregado por equipe, unidade ou distrito |
 
 ## Tecnologias
@@ -77,6 +80,6 @@ flowchart LR
 ```bash
 python src/gerar_sintetico.py   # Estação 1 · ~5 s
 python src/tratamento.py        # Estação 2 · ~3 s
-cd src && python features.py && python baseline.py && cd ..   # Estações 3 e 4
+cd src && python features.py && python baseline.py && python preparar_painel.py && cd ..   # Estações 3 e 4 + agregação
 streamlit run app/app.py        # Estação 5 · abre no navegador
 ```
