@@ -153,8 +153,7 @@ def tela_coordenacao():
             initial_view_state=pdk.ViewState(latitude=-8.06, longitude=-34.93, zoom=10.6),
             tooltip={"text": "{nome_unidade} · {bairro} (DS {distrito_sanitario})\n{pessoas} pessoas\nNão perguntado: {nao_perg_txt}"},
         ), height=430)
-        st.caption("Cada círculo é uma USF (localização do CNES, conferida contra o mapa oficial de bairros). "
-                   "Tamanho = pessoas do grupo registradas. Passe o mouse para ver os números.")
+        st.caption("Cada círculo é uma USF.")
         st.markdown(f"**USF com mais {grupo.lower()}**")
         topo = por_usf.sort_values("pessoas", ascending=False).head(10)
         st.dataframe(
