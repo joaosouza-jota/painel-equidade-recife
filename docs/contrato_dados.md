@@ -27,7 +27,7 @@
 | `nome_unidade` | texto | `USF Ibura de Baixo` | Nome da unidade |
 | `distrito_sanitario` | inteiro 1 a 8 | `8` | Distrito Sanitário do Recife |
 | `bairro` | texto | `Ibura` | Bairro da unidade |
-| `origem` | texto | `cnes` ou `sintetico` | Se a equipe veio do CNES real ou foi inventada |
+| `origem` | texto | `cnes` | A **unidade** é real (CNES). As **equipes** são sintéticas, porque a API aberta do CNES não as traz |
 
 ## Tabela 2 · `fichas_cadastro`
 
@@ -95,16 +95,49 @@ Cada marcador pode estar em um de **três estados**, e a diferença entre eles �
 
 ## Parâmetros da base sintética
 
-> Preenchido no Bloco 2, com a fonte de cada número. Separado entre **[real]** (fonte pública ou reunião) e **[hipótese]** (decisão nossa, a validar com dado real).
+> Gerada por `src/gerar_sintetico.py` (semente fixa 42: rodar de novo gera exatamente a mesma base).
+> **[real]** = fonte pública ou reunião com a cliente · **[hipótese]** = decisão nossa, a validar com dado real.
 
+### Território
 | Parâmetro | Valor | Fonte |
 |---|---|---|
-| % que deseja informar orientação sexual | ~38% | [real] reunião 01/09, um exemplo de unidade |
-| Distritos Sanitários | 8 | [real] briefing |
-| Equipes de Saúde da Família | 384 | [real] briefing (a confirmar no CNES) |
-| *(demais parâmetros)* | | Bloco 2 |
+| Unidades de Saúde da Família | **142** USF ativas, gestão municipal | [real] API de dados abertos do CNES (Ministério da Saúde). Bate com as 141 do briefing |
+| Bairro de cada USF | endereço no CNES | [real] CNES |
+| Distrito Sanitário | 8, pelo mapa oficial de bairros (RPA + microrregião) | [real] Dados Abertos do Recife, "Limites dos Bairros 2023". A divisão RPA 3 → DS 3/7 e RPA 6 → DS 6/8 é [inferência], coerente com a fala da cliente (DS 8 = Ibura e Jordão) |
+| Equipes | **384**, de 2 a 8 por USF | [real] total do briefing · [hipótese] distribuição entre as USF (a CNES aberta não traz as equipes) |
+
+### População
+| Parâmetro | Valor | Fonte |
+|---|---|---|
+| Pessoas por equipe | 2.000 a 3.800 (média 2.900), simuladas a 25% (`ESCALA`) | [hipótese] faixa da PNAB 2017 |
+| Idade | distribuição ano a ano do Recife | [real] IBGE, Censo 2022, tabela 9514 |
+| Raça/cor | parda 48,5% · branca 38,8% · preta 12,3% · amarela 0,2% · indígena 0,2% | [real] IBGE, Censo 2022, tabela 9605 |
+| Variação de raça/cor por distrito | DS 2, 5, 7 e 8 mais negros; DS 3 e 6 mais brancos | [hipótese] coerente com a fala da cliente sobre os morros da zona norte |
+| Deficiência | 8,4% das pessoas com 2 anos ou mais, taxa crescente com a idade | [real] IBGE, Censo 2022, tabela 10131 |
+| Tipo de deficiência | visual 58% · física ~45% · intelectual 19% · auditiva 17% (entre pessoas com deficiência, pode haver mais de um) | [real] IBGE, Censo 2022, tabela 10127 |
+| Orientação sexual | 1,2% homossexual · 0,7% bissexual · 0,2% outras | [real] IBGE, Pesquisa Nacional de Saúde 2019 |
+| Identidade de gênero | 0,69% trans · 1,19% não binário | [real] Spizzirri et al., *Scientific Reports*, 2021 |
+
+### Comportamento das equipes (o que o modelo tenta prever)
+| Parâmetro | Valor | Fonte |
+|---|---|---|
+| % que deseja informar orientação sexual | **~38%** (≈ 58% das pessoas são perguntadas × 65% aceitam) | [real] reunião 01/09 · [hipótese] a divisão entre "perguntou" e "aceitou" |
+| Evolução da equipe | nível próprio + tendência + memória de 60% do período anterior + ruído | [hipótese] |
+| Erro de raça/cor | ~6% das fichas, trocando por categoria vizinha (preta ↔ parda ↔ branca) | [hipótese] |
+| Equipes com erro sistemático de raça/cor | ~5%, com 30 a 50% das fichas marcadas como branca (ou amarela) | [hipótese] os dois exemplos da cliente |
+| Deficiência não identificada | ~10% das pessoas com deficiência registradas como "não" | [hipótese] |
+| Fichas por quadrimestre | 30% das pessoas ativas + todas as saídas | [hipótese] |
+| Saídas por quadrimestre | 2,5% mudança de território · 0,25% óbito, repostas por novos moradores | [hipótese] |
+
+### Arquivos gerados em `data/raw/`
+| Arquivo | Conteúdo |
+|---|---|
+| `territorio_equipes.csv` | Tabela 1 |
+| `fichas_cadastro.parquet` | Tabela 2 (~770 mil fichas) |
+| `_verdade_equipes.parquet` | **Gabarito escondido**: o comportamento real de cada equipe. Não entra no modelo, serve só para conferir o gerador |
+| `_verdade_populacao.parquet` | **Gabarito escondido**: o perfil real de cada pessoa, antes dos erros de registro |
 
 ## Pontos a conferir quando houver dado real
 - Os valores exatos das listas de orientação sexual e identidade de gênero na versão do PEC em uso no Recife.
 - Se registros antigos/migrados trazem raça/cor e deficiência vazios apesar de serem obrigatórios hoje. `[inferência]`
-- 141 USF (briefing) × "mais de 200 unidades" (fala da cliente).
+- ~~141 USF (briefing) × "mais de 200 unidades" (fala da cliente)~~ O CNES confirma 142 USF. As "mais de 200" provavelmente incluem outros tipos de unidade.
