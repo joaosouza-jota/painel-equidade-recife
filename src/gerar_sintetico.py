@@ -376,6 +376,7 @@ def gerar_fichas(pop, comp):
     ativos = pop.copy()
     proximo_id = len(pop) + 1
     lotes = []
+    chegaram = []   # novos moradores, guardados para o gabarito da população
 
     for t, periodo in enumerate(PERIODOS):
         # Saídas do território (a última ficha registra a saída)
@@ -396,12 +397,13 @@ def gerar_fichas(pop, comp):
         if len(saidos):
             novos = gerar_populacao_reposicao(saidos, proximo_id)
             proximo_id += len(novos)
+            chegaram.append(novos)
             lotes.append(registrar(novos.reset_index(drop=True), comp, t, datas_no_periodo(periodo, len(novos)), "novo", "ativo"))
             ativos = pd.concat([ativos, novos], ignore_index=True)
 
     fichas = pd.concat(lotes, ignore_index=True).sort_values(["data_ficha", "ine"]).reset_index(drop=True)
     fichas.insert(0, "id_ficha", np.arange(1, len(fichas) + 1))
-    return fichas
+    return fichas, pd.concat([pop, *chegaram], ignore_index=True)
 
 
 def gerar_populacao_reposicao(saidos, proximo_id):
@@ -418,7 +420,7 @@ def main():
     equipes = criar_equipes(unidades)
     populacao = gerar_populacao(equipes)
     comportamento = comportamento_equipes(equipes)
-    fichas = gerar_fichas(populacao, comportamento)
+    fichas, populacao = gerar_fichas(populacao, comportamento)
 
     equipes.to_csv(RAW / "territorio_equipes.csv", index=False)
     fichas.to_parquet(RAW / "fichas_cadastro.parquet", index=False)
