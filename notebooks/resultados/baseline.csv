@@ -1,0 +1,5 @@
+baseline,recall (críticas encontradas),precisão (alertas certos),F1,acurácia,equipes alertadas,críticas encontradas,críticas no teste
+1. Sempre 'não crítica',0.0,0.0,0.0,0.75,0,0,192
+2. Sorteio de 25%,0.292,0.286,0.289,0.641,196,56,192
+3. Persistência,0.833,0.833,0.833,0.917,192,160,192
+4. Média histórica,0.786,0.786,0.786,0.893,192,151,192
