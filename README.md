@@ -16,4 +16,41 @@ app/         protótipo navegável
 data/        dados gerados (fora do git)
 ```
 
-*(Instruções de execução entram conforme cada etapa for construída.)*
+## Como rodar
+
+Requer Python 3.12. Instale as dependências uma vez:
+
+```bash
+pip install -r requirements.txt
+```
+
+Rode o pipeline em ordem (a base inteira é recriada em menos de 1 minuto):
+
+```bash
+python src/gerar_sintetico.py                                 # 1. gera território + fichas sintéticas
+python src/tratamento.py                                      # 2. padroniza e valida
+cd src && python features.py && python baseline.py && cd ..   # 3 e 4. base do modelo e baselines
+streamlit run app/app.py                                      # 5. abre o painel no navegador
+```
+
+Os notebooks (`notebooks/01_eda.ipynb` e `02_baseline.ipynb`) já estão salvos com as saídas e podem ser reexecutados depois do passo 3.
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| `docs/contrato_dados.md` | Formato dos dados, regras de negócio e a fonte de cada parâmetro da base sintética |
+| `docs/arquitetura.md` | As 5 estações do pipeline, decisões de arquitetura e tecnologias |
+| `notebooks/01_eda.ipynb` | Análise exploratória: 7 perguntas, 7 gráficos |
+| `notebooks/02_baseline.ipynb` | Problema supervisionado, divisão temporal treino/teste e baselines |
+
+## Resultado atual (S06 · 26/09/2026)
+
+| Baseline | Recall (críticas encontradas) | F1 |
+|---|---|---|
+| Sempre "não crítica" | 0,00 | 0,00 |
+| Sorteio de 25% | 0,29 | 0,29 |
+| **Persistência** (quem é crítica continua crítica) | **0,83** | **0,83** |
+| Média histórica | 0,79 | 0,79 |
+
+A persistência é a régua que os modelos da Sprint 1 precisam superar.

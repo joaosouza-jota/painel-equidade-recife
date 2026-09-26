@@ -4,3 +4,6 @@ pyarrow
 matplotlib
 scikit-learn
 jupyter
+streamlit
+altair
+pydeck

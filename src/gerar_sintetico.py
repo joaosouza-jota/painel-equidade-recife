@@ -74,6 +74,25 @@ def distrito_sanitario(rpa, micro):
     return rpa
 
 
+def _aneis(geometria):
+    """Anéis externos de um Polygon/MultiPolygon do GeoJSON, como listas de (lon, lat)."""
+    if geometria["type"] == "Polygon":
+        return [geometria["coordinates"][0]]
+    return [poligono[0] for poligono in geometria["coordinates"]]
+
+
+def _dentro(lon, lat, aneis):
+    """Teste do raio (ray casting): o ponto está dentro de algum dos anéis?"""
+    for anel in aneis:
+        dentro = False
+        for (x1, y1), (x2, y2) in zip(anel, anel[1:] + anel[:1]):
+            if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
+                dentro = not dentro
+        if dentro:
+            return True
+    return False
+
+
 def carregar_unidades():
     bairros = json.load(open(RAW / "bairros_recife_2023.geojson"))["features"]
     ds_por_bairro = {
@@ -81,6 +100,10 @@ def carregar_unidades():
         for b in bairros
     }
     nome_oficial = {normalizar(b["properties"]["EBAIRRNOME"]): b["properties"]["EBAIRRNOMEOF"] for b in bairros}
+    aneis_por_bairro = {normalizar(b["properties"]["EBAIRRNOME"]): _aneis(b["geometry"]) for b in bairros}
+    aneis_por_ds = {}
+    for nome, aneis in aneis_por_bairro.items():
+        aneis_por_ds.setdefault(ds_por_bairro[nome], []).extend(aneis)
 
     cnes = json.load(open(RAW / "cnes" / "estabelecimentos_recife.json"))
     usf = [
@@ -100,8 +123,34 @@ def carregar_unidades():
             "nome_unidade": re.sub(r"^US \d+ ", "", e["nome_fantasia"]).title().replace("Usf", "USF"),
             "bairro": nome_oficial[chave],
             "distrito_sanitario": ds_por_bairro[chave],
+            **coordenada(e, aneis_por_bairro[chave], aneis_por_ds[ds_por_bairro[chave]]),
         })
-    return pd.DataFrame(linhas).sort_values("cnes").reset_index(drop=True)
+    unidades = pd.DataFrame(linhas).sort_values("cnes").reset_index(drop=True)
+
+    # Várias USF corrigidas no mesmo bairro cairiam no mesmo ponto: espalha em círculo (~250 m) para aparecerem no mapa
+    corrigidas = unidades["coordenada_origem"] == "centro_do_bairro"
+    ordem = unidades[corrigidas].groupby("bairro").cumcount()
+    angulo = ordem * 2.4
+    raio = 0.0022 * np.sqrt(ordem)
+    unidades.loc[corrigidas, "latitude"] += raio * np.sin(angulo)
+    unidades.loc[corrigidas, "longitude"] += raio * np.cos(angulo)
+    return unidades
+
+
+def coordenada(estabelecimento, aneis_bairro, aneis_distrito):
+    """[real] Coordenada do CNES, conferida contra os polígonos oficiais dos bairros.
+
+    O CNES tem coordenadas erradas: USF no mar, fora do Recife e ~20 USF com a mesma coordenada padrão no centro
+    da cidade. Aceita o ponto se ele cai no bairro declarado ou em outro bairro do mesmo distrito (divisa);
+    se não, usa o centro aproximado do bairro declarado."""
+    lat = estabelecimento["latitude_estabelecimento_decimo_grau"]
+    lon = estabelecimento["longitude_estabelecimento_decimo_grau"]
+    if lat is not None and lon is not None and (_dentro(lon, lat, aneis_bairro) or _dentro(lon, lat, aneis_distrito)):
+        return {"latitude": lat, "longitude": lon, "coordenada_origem": "cnes"}
+    aneis = aneis_bairro
+    maior = max(aneis, key=len)
+    return {"latitude": float(np.mean([p[1] for p in maior])), "longitude": float(np.mean([p[0] for p in maior])),
+            "coordenada_origem": "centro_do_bairro"}
 
 
 def criar_equipes(unidades):
@@ -123,7 +172,7 @@ def criar_equipes(unidades):
                 **u.to_dict(),
                 "origem": "cnes",                              # unidade real; a equipe em si é sintética
             })
-    colunas = ["ine", "nome_equipe", "cnes", "nome_unidade", "distrito_sanitario", "bairro", "origem"]
+    colunas = ["ine", "nome_equipe", "cnes", "nome_unidade", "distrito_sanitario", "bairro", "latitude", "longitude", "coordenada_origem", "origem"]
     return pd.DataFrame(linhas)[colunas]
 
 

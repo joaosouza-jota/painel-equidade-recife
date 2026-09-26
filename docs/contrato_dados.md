@@ -27,6 +27,8 @@
 | `nome_unidade` | texto | `USF Ibura de Baixo` | Nome da unidade |
 | `distrito_sanitario` | inteiro 1 a 8 | `8` | Distrito Sanitário do Recife |
 | `bairro` | texto | `Ibura` | Bairro da unidade |
+| `latitude`, `longitude` | decimal | `-8.1234`, `-34.9456` | Localização da unidade (CNES). Usada no mapa de concentração |
+| `coordenada_origem` | texto | `cnes`, `centro_do_bairro` | O CNES tem coordenadas erradas: USF no mar, fora do Recife e ~20 USF com a mesma coordenada padrão no centro da cidade. A coordenada é aceita se cai no bairro declarado ou em outro bairro do mesmo distrito (divisa); se não, usa-se o centro do bairro, com as USF espalhadas ~250 m para não se sobreporem no mapa |
 | `origem` | texto | `cnes` | A **unidade** é real (CNES). As **equipes** são sintéticas, porque a API aberta do CNES não as traz |
 
 ## Tabela 2 · `fichas_cadastro`
