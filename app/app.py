@@ -100,21 +100,9 @@ with st.sidebar:
         help="No produto, o perfil vem do login da Secretaria e cada perfil só enxerga o seu recorte.",
     )
     quad = st.select_slider("Quadrimestre", QUADRIMESTRES, value=QUADRIMESTRES[-1])
-    st.divider()
-    st.caption(
-        "⚠️ **Protótipo com dados sintéticos.** Unidades reais (CNES) e perfil da população do Censo 2022; "
-        "fichas simuladas a 25% da população. Nenhum dado real de pessoa."
-    )
 
 res_q = resumo[resumo["quadrimestre"] == quad]
 elegiveis_q = fichas[fichas["quadrimestre"] == quad]
-
-
-def rodape_previsao():
-    st.caption(
-        f"**Risco no próximo quadrimestre ({proximo(quad)})**: previsão provisória pela regra de persistência "
-        "(quem é crítica agora tende a continuar). Na Sprint 1, o modelo de Machine Learning substitui esta regra."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +165,6 @@ def tela_coordenacao():
                 "pessoas": "Pessoas",
                 "% não perguntado": st.column_config.ProgressColumn("Não perguntado", format="percent", min_value=0, max_value=1),
             })
-        st.warning(
-            "**Leia a concentração junto com a qualidade.** Uma USF com poucas pessoas registradas pode ter pouca "
-            "população do grupo **ou** simplesmente não estar perguntando. A coluna \"Não perguntado\" mostra isso."
-        )
 
     with aba_qual:
         nome_marcador = st.radio("Marcador", list(MARCADORES), horizontal=True)
@@ -219,7 +203,6 @@ def tela_coordenacao():
            "ig_preenchido", "raca_preenchido", "deficiencia_preenchido", "status"]].to_csv(index=False).encode("utf-8"),
         file_name=f"equipes_{quad}.csv", mime="text/csv",
     )
-    rodape_previsao()
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +254,6 @@ def tela_distrito():
             st.warning(a, icon="⚠️")
     else:
         st.success("Nenhum alerta neste quadrimestre.")
-    rodape_previsao()
 
 
 # ---------------------------------------------------------------------------
@@ -303,33 +285,6 @@ def tela_equipe():
         st.caption(f"Orientação sexual: {pct(e['os_preenchido'])} informou · {pct(e['os_recusou'])} recusou · "
                    f"**{pct(e['os_nao_perguntado'])} não foi perguntado**")
 
-    st.subheader("O que precisa ser corrigido · sugestões priorizadas")
-    f = elegiveis_q[elegiveis_q["ine"] == ine]
-    rede = res_q.median(numeric_only=True)
-    sugestoes = []
-    n_os = int((f["estado_os"] == "nao_perguntado").sum())
-    if e["os_nao_perguntado"] > rede["os_nao_perguntado"]:
-        sugestoes.append((e["os_nao_perguntado"] - rede["os_nao_perguntado"],
-                          f"{n_os} fichas sem a pergunta de orientação sexual ({pct(e['os_nao_perguntado'])}, a rede tem "
-                          f"{pct(rede['os_nao_perguntado'])}). Reforçar o roteiro de abordagem com os ACS."))
-    n_ig = int((f["estado_ig"] == "nao_perguntado").sum())
-    if e["ig_nao_perguntado"] > rede["ig_nao_perguntado"]:
-        sugestoes.append((e["ig_nao_perguntado"] - rede["ig_nao_perguntado"],
-                          f"{n_ig} fichas sem a pergunta de identidade de gênero. Revisar na próxima visita domiciliar."))
-    if e["inconsistencia_raca"] > LIMITE_INCONSISTENCIA:
-        sugestoes.append((1.0, f"Proporção de pessoas brancas ou amarelas {e['inconsistencia_raca']:.0f} pontos acima do distrito. "
-                               "Conferir se a raça/cor está sendo autodeclarada pela pessoa."))
-    n_raca = int((f["estado_raca"] == "nao_perguntado").sum())
-    if n_raca:
-        sugestoes.append((0.01, f"{n_raca} ficha(s) com raça/cor em branco. Campo obrigatório: completar no próximo atendimento."))
-    n_def = int((f["estado_deficiencia"] == "nao_perguntado").sum())
-    if n_def:
-        sugestoes.append((0.01, f"{n_def} ficha(s) com deficiência em branco. Campo obrigatório: completar no próximo atendimento."))
-    if sugestoes:
-        for i, (_, texto) in enumerate(sorted(sugestoes, reverse=True)):
-            st.checkbox(texto, key=f"sug_{ine}_{i}")
-    else:
-        st.success("Cadastro acima da mediana da rede em todos os campos. 👏")
 
     hist = resumo[resumo["ine"] == ine]
     limites = resumo.groupby("quadrimestre")["indice_completude"].quantile(0.25).rename("limite").reset_index()
@@ -340,7 +295,6 @@ def tela_equipe():
         x="quadrimestre:O", y="limite:Q", tooltip=[alt.Tooltip("limite:Q", format=".1f", title="Limite crítico")])
     st.altair_chart((corte + linha).properties(height=240, title="Evolução da nota · tracejado = limite das 25% piores"),
                     width="stretch")
-    rodape_previsao()
 
 
 {"Coordenação": tela_coordenacao, "Gestão de Distrito": tela_distrito, "Equipe de Saúde": tela_equipe}[perfil]()
