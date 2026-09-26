@@ -28,7 +28,6 @@ RAW = RAIZ / "data" / "raw"
 
 AZUL, LARANJA, VERDE_AGUA, AMARELO = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 CATEGORICAS = [AZUL, LARANJA, VERDE_AGUA, AMARELO, "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-LIMITE_INCONSISTENCIA = 15   # pontos acima da mediana do distrito (notebook 01)
 
 MARCADORES = {
     "Orientação sexual": "estado_os",
@@ -236,24 +235,6 @@ def tela_distrito():
             "status": "Status", "risco": f"Risco em {proximo(quad)}",
         })
 
-    st.subheader("Alertas")
-    anterior = resumo[(resumo["quadrimestre"] < quad) & (resumo["distrito_sanitario"] == ds)]
-    alertas = []
-    for _, e in r.iterrows():
-        if e["inconsistencia_raca"] > LIMITE_INCONSISTENCIA:
-            alertas.append(f"**{e['nome_equipe']}**: pessoas brancas ou amarelas {e['inconsistencia_raca']:.0f} pontos acima "
-                           "do distrito. Possível erro de registro de raça/cor: revisar a autodeclaração.")
-        hist = anterior[anterior["ine"] == e["ine"]].sort_values("quadrimestre")
-        if len(hist) and e["indice_completude"] - hist["indice_completude"].iloc[-1] <= -8:
-            alertas.append(f"**{e['nome_equipe']}**: índice caiu {hist['indice_completude'].iloc[-1] - e['indice_completude']:.0f} "
-                           "pontos em relação ao quadrimestre anterior.")
-        if len(hist) >= 2 and e["critica"] == 1 and hist["critica"].tail(2).sum() == 2:
-            alertas.append(f"**{e['nome_equipe']}**: crítica há 3 quadrimestres seguidos. Prioridade para oficina.")
-    if alertas:
-        for a in alertas:
-            st.warning(a, icon="⚠️")
-    else:
-        st.success("Nenhum alerta neste quadrimestre.")
 
 
 # ---------------------------------------------------------------------------
