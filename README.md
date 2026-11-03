@@ -11,8 +11,9 @@ Projeto 3 (Dados) + Machine Learning I · CESAR School · 2026.2 · Cliente: Sec
 ```
 docs/        contrato de dados e arquitetura
 src/         código do pipeline
-notebooks/   análise exploratória e experimentos
-app/         protótipo navegável
+db/          banco PostgreSQL: esquema, carga e consultas
+notebooks/   análise exploratória, experimentos e base proxy (Inferência)
+app/         app Streamlit: Painel + Banco de Dados
 data/        dados gerados (fora do git)
 ```
 
@@ -38,6 +39,28 @@ Para só abrir o painel, basta o último comando: os dados agregados que ele usa
 
 Os notebooks (`notebooks/01_eda.ipynb` e `02_baseline.ipynb`) já estão salvos com as saídas e podem ser reexecutados depois do passo 3.
 
+### Banco de dados (PostgreSQL)
+
+Um banco só para o projeto: as 9 tabelas do modelo lógico (Banco de Dados), a tabela `respostas_sinteticas` (Inferência Estatística) e o risco previsto por equipe (Machine Learning). Funciona com PostgreSQL local ou Neon: a conexão vem **só** da variável `DATABASE_URL`, nunca do código.
+
+```bash
+createdb painel_equidade                                   # PostgreSQL local (ou crie um projeto no Neon)
+export DATABASE_URL="postgresql:///painel_equidade"        # Neon: postgresql://usuario:senha@host/neondb?sslmode=require
+python db/carregar_banco.py                                # cria o esquema (db/schema.sql) e carrega a base (~15 s)
+jupyter nbconvert --execute --inplace notebooks/03_base_proxy_distritos.ipynb   # grava respostas_sinteticas
+streamlit run app/app.py                                   # página "Banco de Dados" no menu lateral
+```
+
+| Arquivo | Conteúdo |
+|---|---|
+| `db/schema.sql` | Esquema (tabelas, restrições, sequências, índices) |
+| `db/carregar_banco.py` | Carga da base do pipeline no banco (INSERT e COPY explícitos) |
+| `db/consultas.py` | As 7 consultas da interface (fonte única do SQL) |
+| `db/consultas.sql` | As mesmas consultas com valores de exemplo, prontas para o psql (gerado por `db/gerar_consultas_sql.py`) |
+| `app/paginas/banco_de_dados.py` | Interface: consultas com gráficos, visualização das tabelas, cadastro de equipes e fichas |
+
+A página Banco de Dados só abre com `DATABASE_URL` definida. No painel publicado na nuvem ela mostra um aviso e não toca em banco nenhum.
+
 ## Documentação
 
 | Documento | Conteúdo |
@@ -46,6 +69,7 @@ Os notebooks (`notebooks/01_eda.ipynb` e `02_baseline.ipynb`) já estão salvos 
 | `docs/arquitetura.md` | As 5 estações do pipeline, decisões de arquitetura e tecnologias |
 | `notebooks/01_eda.ipynb` | Análise exploratória: 7 perguntas, 7 gráficos |
 | `notebooks/02_baseline.ipynb` | Problema supervisionado, divisão temporal treino/teste e baselines |
+| `notebooks/03_base_proxy_distritos.ipynb` | Inferência Estatística: base proxy de orientação sexual e identidade de gênero por distrito, validada com testes |
 
 ## Resultado atual (S06 · 26/09/2026)
 

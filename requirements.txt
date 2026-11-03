@@ -7,3 +7,5 @@ jupyter
 streamlit
 altair
 pydeck
+scipy
+psycopg[binary]

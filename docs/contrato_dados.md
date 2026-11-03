@@ -2,7 +2,7 @@
 
 > **O que é:** a lista exata de tabelas e colunas que o pipeline espera receber.
 > **Por que existe:** a Secretaria não liberou os dados reais do PEC. Tudo que vem depois da Estação 1 (limpeza, resumo, modelo, painel) lê **este formato**. Hoje quem o produz é o gerador sintético. No dia em que a Secretaria fizer a extração real neste formato, só a Estação 1 muda.
-> **Base de referência:** campos da Ficha de Cadastro Individual do e-SUS APS e a reunião com a Secretaria (01/09/2026). Os nomes das colunas são nossos (padrão `snake_case`), não os nomes internos do PEC.
+> **Base de referência:** Ficha de Cadastro Individual do e-SUS APS **v5.3** (modelo enviado pela Secretaria em 03/11/2026, em `conteudo/briefing/`) e a reunião com a Secretaria (01/09/2026). Os nomes das colunas são nossos (padrão `snake_case`), não os nomes internos do PEC.
 
 ---
 
@@ -47,7 +47,7 @@
 | Coluna | Tipo | Valores | Descrição |
 |---|---|---|---|
 | `idade` | inteiro | 0 a 110 | Idade na data da ficha (a extração real traria a data de nascimento; guardamos só a idade) |
-| `sexo` | texto | `F`, `M` | Sexo informado no cadastro |
+| `sexo` | texto | `F`, `M`, `I` | Sexo informado no cadastro (`I` = Indeterminado, opção da ficha v5.3) |
 | `nome_social` | booleano | | Se o campo nome social foi preenchido (o nome em si **não** é guardado) |
 
 ### Marcadores de equidade
@@ -58,13 +58,13 @@ Cada marcador pode estar em um de **três estados**, e a diferença entre eles �
 |---|---|---|
 | **preenchido** | A pergunta foi feita e respondida | |
 | **recusou** | A pessoa disse que **não deseja informar** | Escolha da pessoa |
-| **não perguntado** | Campo vazio | **Falha da equipe** |
+| **N/I · não informado** | Campo vazio (`NULL` no banco) | **Falha da equipe** |
 
 | Coluna | Tipo | Valores | Observação |
 |---|---|---|---|
 | `raca_cor` | texto | `branca`, `preta`, `parda`, `amarela`, `indigena`, vazio | Padrão IBGE. Obrigatório no PEC, então o problema principal é **inconsistência** (valor errado), não campo vazio |
-| `tem_deficiencia` | texto | `sim`, `nao`, vazio | Obrigatório no PEC |
-| `tipo_deficiencia` | texto | `auditiva`, `visual`, `intelectual`, `fisica`, `outra`, vazio | Só quando `tem_deficiencia = sim`. Se houver mais de uma, separadas por `;` |
+| `tem_deficiencia` | texto | `sim`, `nao`, vazio | Na ficha v5.3 **não tem asterisco** (não é obrigatório), embora a cliente tenha falado em obrigatório em 01/09. Vazio = N/I |
+| `tipo_deficiencia` | texto | `auditiva`, `visual`, `intelectual`, `fisica`, `tea`, `outra`, vazio | Só quando `tem_deficiencia = sim`. Se houver mais de uma, separadas por `;` |
 | `deseja_informar_os` | texto | `sim`, `nao`, vazio | **"Deseja informar orientação sexual?"** `nao` = recusou · vazio = não perguntado |
 | `orientacao_sexual` | texto | `heterossexual`, `gay`, `lesbica`, `bissexual`, `assexual`, `pansexual`, `outra`, vazio | Só quando `deseja_informar_os = sim` |
 | `deseja_informar_ig` | texto | `sim`, `nao`, vazio | **"Deseja informar identidade de gênero?"** Mesma lógica |
@@ -138,6 +138,17 @@ Cada marcador pode estar em um de **três estados**, e a diferença entre eles �
 | `fichas_cadastro.parquet` | Tabela 2 (~770 mil fichas) |
 | `_verdade_equipes.parquet` | **Gabarito escondido**: o comportamento real de cada equipe. Não entra no modelo, serve só para conferir o gerador |
 | `_verdade_populacao.parquet` | **Gabarito escondido**: o perfil real de cada pessoa, antes dos erros de registro |
+
+## O que a ficha v5.3 confirmou ou mudou (03/11/2026)
+
+| Item | Na ficha | Efeito |
+|---|---|---|
+| "Deseja informar orientação sexual / identidade de gênero?" | Obrigatório (`*`), Sim/Não, com "Se sim, qual?" condicionado | Mantidos os 3 estados. Quando a equipe não registra, o campo fica **N/I** (vazio). Decisão do time em 03/11 |
+| Categorias de orientação e de gênero | Iguais às do contrato ("Outro" = `outra`) | Nada muda |
+| Deficiência | Sem `*`; tipos: auditiva, intelectual/cognitiva, **TEA**, visual, física, outra | `tea` entra como categoria; vazio = N/I |
+| Sexo | F, M, **I** (Indeterminado) | `I` aceito |
+| Raça/cor | Obrigatório; **Etnia** obrigatória se Indígena | Etnia fica fora por enquanto (sem uso nas 3 políticas) |
+| Microárea, situação de rua, povos tradicionais, escolaridade, TRIA | Existem | Fora do escopo das 3 políticas |
 
 ## Pontos a conferir quando houver dado real
 - Os valores exatos das listas de orientação sexual e identidade de gênero na versão do PEC em uso no Recife.
