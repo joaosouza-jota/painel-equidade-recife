@@ -5,12 +5,14 @@ Segue os wireframes do Kickoff: uma tela por perfil (Coordenação, Gestão de D
 Lê só dados agregados por equipe, USF e distrito (app/dados, gerados por src/preparar_painel.py):
 nenhuma ficha individual chega ao painel.
 
-Protótipo: o perfil é escolhido na barra lateral (no produto, viria do login da Secretaria) e a previsão
-de risco usa a baseline de persistência (o modelo de ML entra no lugar dela na Sprint 1).
+Protótipo: o perfil é escolhido na barra lateral (no produto, viria do login da Secretaria).
+Dados: do banco (visões materializadas atualizadas pela pipeline, src/pipeline.py) com o risco do modelo de
+ML; sem banco, da cópia estática em app/dados (e o risco vira a baseline de persistência). Ver app/dados_painel.py.
 
 Página do roteador app/app.py.
 """
 
+import sys
 from pathlib import Path
 
 import altair as alt
@@ -18,7 +20,9 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-DADOS = Path(__file__).resolve().parents[1] / "dados"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dados_painel import carregar, risco  # noqa: E402
+
 
 AZUL, LARANJA, VERDE_AGUA, AMARELO = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 CATEGORICAS = [AZUL, LARANJA, VERDE_AGUA, AMARELO, "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
@@ -41,18 +45,16 @@ POPULACOES = [
 # Dados (carregados uma vez e guardados em cache)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner="Carregando dados...")
-def carregar():
-    return {nome: pd.read_parquet(DADOS / f"{nome}.parquet")
-            for nome in ["resumo_equipes", "estados_distrito", "populacao_usf", "territorio_usf"]}
-
-
 def pct(x):
     return f"{x * 100:.0f}%"
 
 
-dados = carregar()
-resumo = dados["resumo_equipes"]
+dados, ORIGEM = carregar()
+resumo = dados["resumo_equipes"].assign(risco=lambda d: risco(d))
+LIMIAR_RISCO = 0.5
+AJUDA_RISCO = ("Modelo de ML (regressão logística) treinado pela pipeline: equipes com probabilidade >= 50% de estarem "
+               "entre as 25% piores no próximo quadrimestre." if ORIGEM == "banco"
+               else "Baseline de persistência (cópia estática, sem modelo): equipes críticas agora.")
 QUADRIMESTRES = sorted(resumo["quadrimestre"].unique())
 
 
@@ -95,7 +97,7 @@ def tela_coordenacao():
     c1.metric("Equipes", len(r))
     c2.metric("Índice de completude (mediana)", f"{r['indice_completude'].median():.0f} / 100")
     c3.metric("Equipes críticas agora", int(r["critica"].sum()))
-    c4.metric(f"Em risco em {proximo(quad)}", int(r["critica"].sum()), help="Baseline de persistência")
+    c4.metric(f"Em risco em {proximo(quad)}", int((r["risco"] >= LIMIAR_RISCO).sum()), help=AJUDA_RISCO)
 
     aba_pop, aba_qual = st.tabs(["📍 Onde está a população", "✅ Qualidade do registro"])
 
@@ -182,10 +184,10 @@ def tela_distrito():
     c1.metric("Equipes", len(r))
     c2.metric("Índice (mediana)", f"{r['indice_completude'].median():.0f}", f"{r['indice_completude'].median() - rede:+.1f} vs. rede")
     c3.metric("Críticas agora", int(r["critica"].sum()))
-    c4.metric(f"Em risco em {proximo(quad)}", int(r["critica"].sum()), help="Baseline de persistência")
+    c4.metric(f"Em risco em {proximo(quad)}", int((r["risco"] >= LIMIAR_RISCO).sum()), help=AJUDA_RISCO)
 
     st.subheader("Ranking das equipes · da mais crítica para a melhor")
-    tabela = r.assign(risco=r["critica"].map({1: "⚠️ Sim", 0: "Não"}))
+    tabela = r
     st.dataframe(
         tabela[["nome_equipe", "indice_completude", "os_preenchido", "ig_preenchido",
                 "raca_preenchido", "status", "risco"]],
@@ -196,7 +198,9 @@ def tela_distrito():
             "os_preenchido": st.column_config.NumberColumn("Orientação sexual", format="percent"),
             "ig_preenchido": st.column_config.NumberColumn("Identidade de gênero", format="percent"),
             "raca_preenchido": st.column_config.NumberColumn("Raça/cor", format="percent"),
-            "status": "Status", "risco": f"Risco em {proximo(quad)}",
+            "status": "Status",
+            "risco": st.column_config.ProgressColumn(f"Risco em {proximo(quad)}", format="percent", min_value=0,
+                                                     max_value=1, help=AJUDA_RISCO),
         })
 
 
@@ -221,7 +225,8 @@ def tela_equipe():
         st.metric("Nota de qualidade do cadastro", f"{e['indice_completude']:.0f} / 100",
                   f"{e['indice_completude'] - media_ds:+.1f} vs. mediana do distrito")
         st.markdown(f"Status: **{e['status']}**")
-        st.markdown(f"Risco em {proximo(quad)}: **{'⚠️ Sim' if e['critica'] else 'Não'}**")
+        st.markdown(f"Risco em {proximo(quad)}: **{pct(e['risco'])}**" + (" ⚠️" if e["risco"] >= LIMIAR_RISCO else ""),
+                    help=AJUDA_RISCO)
     with col_campos:
         st.markdown("**Completude por campo**")
         for nome, valor in [("Raça/cor", e["raca_preenchido"]), ("Deficiência", e["deficiencia_preenchido"]),

@@ -59,11 +59,24 @@ streamlit run app/app.py                                   # página "Banco de D
 | `db/consultas.sql` | As mesmas consultas com valores de exemplo, prontas para o psql (gerado por `db/gerar_consultas_sql.py`) |
 | `db/ingestao.py` | Importação de fichas por CSV/planilha: validação, gravação e recálculo dos indicadores |
 | `db/gerar_exemplos_ingestao.py` | Arquivos de teste da importação em `data/exemplos/` (a partir da base sintética) |
+| `db/painel.sql` | Camada do painel: visões materializadas (agregados) e o registro `execucao_pipeline` |
+| `src/pipeline.py` | Pipeline: atualiza os agregados, treina e avalia o modelo, grava o risco |
+| `app/dados_painel.py` | De onde o Painel e as Estatísticas leem (banco ou cópia estática) |
 | `db/migrar_para_neon.sh` | Copia o banco local inteiro para o Neon e confere tabela por tabela |
 | `db/migracoes/` | Alterações para bancos criados antes de cada mudança (ex.: `data_entrada`) |
 | `app/paginas/banco_de_dados.py` | Interface: consultas com gráficos, tabelas, cadastro de equipes e fichas, importação de arquivo |
 
 `ficha_cadastro.data_envio` é quando a equipe enviou a ficha; `data_entrada` é quando ela entrou no banco (preenchida pelo próprio banco). A aba "Importar arquivo" mostra o histórico de entradas.
+
+#### Pipeline automatizada
+
+```
+arquivo (CSV/Excel) ─► validação ─► fichas no banco (data_entrada) ─► indicadores das equipes
+   ─► agregados do painel (visões materializadas, db/painel.sql) ─► modelo de ML (src/pipeline.py)
+   ─► risco de cada equipe no próximo quadrimestre ─► Painel e Estatísticas
+```
+
+Roda sozinha depois de cada importação na aba "Importar arquivo"; também pelo botão da aba "Pipeline" ou por `python src/pipeline.py`. Cada execução fica registrada em `execucao_pipeline` (tempo, F1 do modelo contra a persistência, equipes em risco). O Painel e as Estatísticas leem do banco; sem banco configurado, leem a cópia estática de `app/dados/` (e o risco vira a baseline de persistência).
 
 #### Banco na nuvem (Neon)
 

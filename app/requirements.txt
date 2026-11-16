@@ -8,3 +8,5 @@ pydeck==0.9.3
 # Página Banco de Dados (PostgreSQL no Neon) e importação de planilhas
 psycopg[binary]==3.3.7
 openpyxl==3.1.5
+# Pipeline: modelo de ML treinado a cada importação
+scikit-learn==1.9.0

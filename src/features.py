@@ -51,8 +51,15 @@ def inconsistencia_raca(fichas):
 
 
 def montar_base(fichas):
-    r = resumo_equipe_periodo(fichas).sort_values(["ine", "quadrimestre"]).reset_index(drop=True)
+    r = resumo_equipe_periodo(fichas)
     r = r.merge(inconsistencia_raca(fichas), on=["ine", "quadrimestre"], how="left")
+    return base_do_resumo(r)
+
+
+def base_do_resumo(resumo):
+    """Variáveis e alvo a partir do resumo por equipe x quadrimestre (com inconsistencia_raca).
+    Usada pelo pipeline do banco (src/pipeline.py), que já recebe o resumo pronto do PostgreSQL."""
+    r = resumo.sort_values(["ine", "quadrimestre"]).reset_index(drop=True).copy()
     por_equipe = r.groupby("ine")
 
     # Posição relativa na rede no próprio quadrimestre (0 = pior equipe, 1 = melhor)

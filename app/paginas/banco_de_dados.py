@@ -5,6 +5,7 @@ Banco de Dados (Etapa 03): interface sobre o PostgreSQL do projeto.
 - Tabelas: visualização de qualquer tabela do banco
 - Equipes e Fichas de cadastro: inserção, alteração e exclusão
 - Importar arquivo: ingestão de fichas por CSV ou planilha (db/ingestao.py), com validação e recálculo dos indicadores
+- Pipeline: depois de cada importação (ou pelo botão) atualiza os agregados do painel e o modelo de ML (src/pipeline.py)
 
 Todo acesso ao banco é SQL explícito executado pelo psycopg (driver do PostgreSQL para Python).
 Conexão pela variável DATABASE_URL ou pelo segredo DATABASE_URL do Streamlit (banco Neon, na nuvem);
@@ -24,6 +25,9 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "db"))
 from consultas import CONSULTAS, EXEMPLO, GRUPOS  # noqa: E402
 import ingestao  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+import pipeline  # noqa: E402
 
 AZUL, LARANJA, VERDE_AGUA = "#2a78d6", "#eb6834", "#1baf7a"
 CATEGORICAS = [AZUL, LARANJA, VERDE_AGUA, "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
@@ -126,8 +130,23 @@ with st.sidebar:
                             format_func=lambda d: f"DS {d}")
 ano, numero = (int(x) for x in quad.split("."))
 
-aba_consultas, aba_tabelas, aba_equipes, aba_fichas, aba_importar = st.tabs(
-    ["📊 Consultas e gráficos", "🗂️ Tabelas", "👥 Equipes", "📝 Fichas de cadastro", "📥 Importar arquivo"])
+aba_consultas, aba_tabelas, aba_equipes, aba_fichas, aba_importar, aba_pipeline = st.tabs(
+    ["📊 Consultas e gráficos", "🗂️ Tabelas", "👥 Equipes", "📝 Fichas de cadastro", "📥 Importar arquivo",
+     "⚙️ Pipeline"])
+
+
+def rodar_pipeline(gatilho):
+    """Roda src/pipeline.py mostrando cada passo e limpa o cache do Painel e das Estatísticas."""
+    with st.status("Pipeline: atualizando painel e modelo...", expanded=True) as caixa:
+        try:
+            r = pipeline.rodar(URL, gatilho=gatilho, log=st.write)
+        except Exception as e:
+            caixa.update(label="Pipeline falhou (o erro ficou registrado na aba Pipeline)", state="error")
+            st.error(str(e))
+            return None
+        st.cache_data.clear()   # Painel e Estatísticas releem o banco na próxima visita
+        caixa.update(label=f"Pipeline concluída em {r['segundos']:.0f} s: painel e risco atualizados", state="complete")
+        return r
 
 
 # ---------------------------------------------------------------------------
@@ -475,14 +494,16 @@ with aba_importar:
         st.dataframe(hist, hide_index=True, width="stretch")
 
     arquivo = st.file_uploader("Arquivo de fichas", type=["csv", "xlsx"])
+    lido = None
     if arquivo is not None:
         try:
             df = ingestao.ler(arquivo, arquivo.name)
             validas, erros = ingestao.validar(df, ingestao.ines_cadastrados(URL))
+            lido = True
         except ValueError as e:
             st.error(str(e))
-            st.stop()
 
+    if lido:
         m = st.columns(3)
         m[0].metric("Linhas no arquivo", f"{len(df):,}".replace(",", "."))
         m[1].metric("Prontas para gravar", f"{len(validas):,}".replace(",", "."))
@@ -527,3 +548,33 @@ with aba_importar:
                             hide_index=True, width="stretch")
                     with st.expander("SQL executado"):
                         st.code(";\n\n".join(executados) + ";", language="sql")
+                    if r["fichas_inseridas"]:
+                        rodar_pipeline("importacao")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline: agregados do painel + modelo de ML, automáticos a cada importação
+# ---------------------------------------------------------------------------
+
+with aba_pipeline:
+    st.markdown(
+        "**Fluxo automático:** arquivo importado → validação → fichas no banco (com data de entrada) → "
+        "indicadores das equipes → **agregados do painel** (visões materializadas) → **modelo de ML** "
+        "(regressão logística, avaliado contra a persistência) → **risco** de cada equipe no próximo quadrimestre "
+        "→ Painel e Estatísticas. Roda sozinho depois de cada importação; o botão abaixo roda na hora "
+        "(ex.: depois de cadastrar ou alterar fichas na aba Fichas).")
+    if st.button("Rodar pipeline agora", type="primary"):
+        rodar_pipeline("manual")
+    st.markdown("**Execuções**")
+    execucoes = consultar("""
+        SELECT id_execucao AS "nº", inicio, gatilho, situacao,
+               ROUND(EXTRACT(EPOCH FROM fim - inicio)::numeric, 1) AS segundos,
+               fichas_no_banco, ultimo_quadrimestre, modelo, f1_modelo, f1_persistencia, equipes_em_risco, erro
+        FROM execucao_pipeline ORDER BY id_execucao DESC LIMIT 20""")
+    if len(execucoes):
+        execucoes["inicio"] = (pd.to_datetime(execucoes["inicio"]).dt.tz_convert("America/Recife")
+                               .dt.strftime("%d/%m/%Y %H:%M:%S"))
+    st.dataframe(execucoes, hide_index=True, width="stretch")
+    st.caption("F1 = equilíbrio entre achar as equipes que ficaram críticas e não dar alarme falso, medido nos "
+               "2 quadrimestres mais recentes com resultado conhecido (o modelo não os vê no treino). "
+               "Persistência = regra \"quem é crítica agora continua crítica\", a régua mínima.")

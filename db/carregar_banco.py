@@ -8,6 +8,8 @@ para as grandes (cidadão, ficha e ficha_deficiencia).
 Conexão só pela variável de ambiente DATABASE_URL (PostgreSQL local ou Neon). Exemplo local:
     export DATABASE_URL="postgresql:///painel_equidade"
 
+Ao final cria a camada do painel (db/painel.sql) e roda a pipeline (src/pipeline.py).
+
 Uso (na raiz do projeto, depois de src/gerar_sintetico.py e do pipeline):
     python db/carregar_banco.py
 """
@@ -134,6 +136,8 @@ def main():
                 (r.ine, int(ano), int(n), int(r.n_fichas), round(float(r.indice_completude), 2), bool(r.critica),
                  None if pd.isna(r.risco_previsto) else round(float(r.risco_previsto), 4)))
 
+        # Camada do painel (visões materializadas) e registro de execuções da pipeline
+        cur.execute((RAIZ / "db" / "painel.sql").read_text())
         cur.execute("ANALYZE")
         for t in ["bairro", "unidade_saude", "equipe", "cidadao", "ficha_cadastro", "tipo_deficiencia",
                   "ficha_deficiencia", "quadrimestre", "indicador_equipe"]:
@@ -143,3 +147,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Pipeline: agregados do painel + modelo de ML gravando o risco (src/pipeline.py)
+    sys.path.insert(0, str(RAIZ / "src"))
+    from pipeline import rodar
+    rodar(os.environ["DATABASE_URL"], gatilho="carga_inicial")

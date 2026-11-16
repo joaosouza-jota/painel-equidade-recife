@@ -4,18 +4,21 @@ Detalhamento das estatísticas de resumo do painel.
 Unidade de análise: a equipe no quadrimestre (uma linha de app/dados/resumo_equipes.parquet).
 Mostra medidas de posição e dispersão de cada indicador, a distribuição entre as equipes,
 a comparação entre distritos, a evolução no tempo e as equipes fora do padrão (regra 1,5 × IIQ).
-Lê só dados agregados por equipe, como o Painel: funciona também na versão publicada.
+Lê só dados agregados por equipe, do mesmo lugar que o Painel (app/dados_painel.py).
 
 Página do roteador app/app.py.
 """
 
+import sys
 from pathlib import Path
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 
-DADOS = Path(__file__).resolve().parents[1] / "dados"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dados_painel import carregar, risco  # noqa: E402
+
 AZUL, LARANJA = "#2a78d6", "#eb6834"
 
 # coluna -> (nome na tela, é proporção 0-1? -> mostra em %)
@@ -28,14 +31,15 @@ VARIAVEIS = {
     "os_nao_perguntado":      ("Orientação sexual: N/I (%)", True),
     "ig_preenchido":          ("Identidade de gênero preenchida (%)", True),
     "ig_nao_perguntado":      ("Identidade de gênero: N/I (%)", True),
-    "inconsistencia_raca":    ("Inconsistência de raça/cor (%)", True),
+    "inconsistencia_raca":    ("Inconsistência de raça/cor (pontos percentuais)", False),
+    "risco":                  ("Risco de ficar crítica no próximo quadrimestre (%)", True),
     "n_fichas":               ("Fichas enviadas no quadrimestre", False),
 }
 
 
-@st.cache_data(show_spinner="Carregando dados...")
-def carregar():
-    df = pd.read_parquet(DADOS / "resumo_equipes.parquet")
+def carregar_resumo():
+    dados, _ = carregar()
+    df = dados["resumo_equipes"].assign(risco=lambda d: risco(d))
     for col, (_, proporcao) in VARIAVEIS.items():
         if proporcao:
             df[col] = df[col] * 100
@@ -68,7 +72,7 @@ def tabela(linhas, indice):
                            | {"Assimetria": "{:.2f}"})
 
 
-resumo = carregar()
+resumo = carregar_resumo()
 QUADRIMESTRES = sorted(resumo["quadrimestre"].unique())
 
 st.title("Estatísticas de resumo")
