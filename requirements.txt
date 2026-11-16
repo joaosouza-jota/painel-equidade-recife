@@ -9,3 +9,4 @@ altair
 pydeck
 scipy
 psycopg[binary]
+openpyxl

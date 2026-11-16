@@ -5,3 +5,6 @@ numpy==2.5.2
 pyarrow==25.0.1
 altair==6.3.0
 pydeck==0.9.3
+# Página Banco de Dados (PostgreSQL no Neon) e importação de planilhas
+psycopg[binary]==3.3.7
+openpyxl==3.1.5

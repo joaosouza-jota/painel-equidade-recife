@@ -4,14 +4,17 @@ Banco de Dados (Etapa 03): interface sobre o PostgreSQL do projeto.
 - Consultas e gráficos: as consultas de db/consultas.py, com o SQL executado à mostra
 - Tabelas: visualização de qualquer tabela do banco
 - Equipes e Fichas de cadastro: inserção, alteração e exclusão
+- Importar arquivo: ingestão de fichas por CSV ou planilha (db/ingestao.py), com validação e recálculo dos indicadores
 
 Todo acesso ao banco é SQL explícito executado pelo psycopg (driver do PostgreSQL para Python).
-Conexão só pela variável de ambiente DATABASE_URL; sem ela (ex.: Streamlit Cloud) a página não abre.
+Conexão pela variável DATABASE_URL ou pelo segredo DATABASE_URL do Streamlit (banco Neon, na nuvem);
+sem nenhum dos dois a página não abre.
 """
 
 import os
 import sys
 from datetime import date
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import altair as alt
@@ -20,18 +23,32 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "db"))
 from consultas import CONSULTAS, EXEMPLO, GRUPOS  # noqa: E402
+import ingestao  # noqa: E402
 
 AZUL, LARANJA, VERDE_AGUA = "#2a78d6", "#eb6834", "#1baf7a"
 CATEGORICAS = [AZUL, LARANJA, VERDE_AGUA, "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 
-URL = os.environ.get("DATABASE_URL")
+def _url_banco():
+    """Conexão do banco: variável de ambiente DATABASE_URL (local) ou segredo do Streamlit
+    (.streamlit/secrets.toml local, ou Settings > Secrets no Streamlit Cloud). Nunca no código."""
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    try:
+        return st.secrets.get("DATABASE_URL")
+    except FileNotFoundError:
+        return None
+    except Exception:  # sem secrets.toml, algumas versões levantam outro erro
+        return None
+
+
+URL = _url_banco()
 
 st.title("Banco de Dados")
 st.caption("PostgreSQL · base SINTÉTICA no formato da Ficha de Cadastro Individual do e-SUS APS (v5.3)")
 
 if not URL:
-    st.info("Esta página conecta direto no PostgreSQL e só funciona na versão local do projeto, com a variável "
-            "`DATABASE_URL` definida. Veja o README.")
+    st.info("Esta página conecta direto no PostgreSQL (Neon) e precisa da conexão `DATABASE_URL` "
+            "(variável de ambiente ou segredo do Streamlit). Veja o README.")
     st.stop()
 
 import psycopg  # noqa: E402  (só quando há banco: o painel publicado não precisa do driver)
@@ -109,8 +126,8 @@ with st.sidebar:
                             format_func=lambda d: f"DS {d}")
 ano, numero = (int(x) for x in quad.split("."))
 
-aba_consultas, aba_tabelas, aba_equipes, aba_fichas = st.tabs(
-    ["📊 Consultas e gráficos", "🗂️ Tabelas", "👥 Equipes", "📝 Fichas de cadastro"])
+aba_consultas, aba_tabelas, aba_equipes, aba_fichas, aba_importar = st.tabs(
+    ["📊 Consultas e gráficos", "🗂️ Tabelas", "👥 Equipes", "📝 Fichas de cadastro", "📥 Importar arquivo"])
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +321,8 @@ INSERIR_DEFICIENCIA = "INSERT INTO ficha_deficiencia (id_ficha, id_tipo_deficien
 
 COLUNAS_FICHA = """f.id_ficha, f.data_envio, f.tipo_ficha, f.situacao, f.idade, f.sexo, f.usa_nome_social,
                    f.raca_cor, f.tem_deficiencia, f.deseja_informar_os, f.orientacao_sexual,
-                   f.deseja_informar_ig, f.identidade_genero, f.cod_cidadao, e.nome AS equipe"""
+                   f.deseja_informar_ig, f.identidade_genero, f.cod_cidadao, e.nome AS equipe,
+                   f.data_entrada"""
 
 
 def campos_marcadores(prefixo, atual=None):
@@ -416,3 +434,96 @@ with aba_fichas:
                 if st.checkbox("Confirmo a exclusão", key="conf_ficha") and st.button("Excluir ficha", type="primary"):
                     mostrar_resultado(*executar([("DELETE FROM ficha_cadastro WHERE id_ficha = %s", (int(id_ficha),))]),
                                       "Ficha excluída.")
+
+
+# ---------------------------------------------------------------------------
+# Importar arquivo: ingestão de fichas por CSV ou planilha
+# ---------------------------------------------------------------------------
+
+with aba_importar:
+    st.caption("Envie um CSV ou uma planilha Excel com fichas de cadastro, uma por linha. O arquivo é conferido "
+               "contra as regras do banco antes de gravar. Ao gravar, os indicadores das equipes nos quadrimestres "
+               "que receberam fichas são recalculados.")
+    c1, c2 = st.columns([3, 1])
+    with c2:
+        st.download_button("Baixar modelo (.csv)", ingestao.modelo_csv(), "modelo_fichas.csv", "text/csv",
+                           width="stretch")
+    with c1:
+        with st.expander("Colunas do arquivo"):
+            st.markdown(
+                f"**Obrigatórias:** `{'`, `'.join(ingestao.OBRIGATORIAS)}`  \n"
+                f"**Opcionais:** `{'`, `'.join(ingestao.OPCIONAIS)}`  \n"
+                "Datas em AAAA-MM-DD ou DD/MM/AAAA · `tipo_deficiencia` com categorias separadas por `;` · "
+                "marcador vazio = N/I · `id_ficha` opcional: se vier, reimportar o mesmo arquivo não duplica fichas. "
+                "Aceita também os nomes do PEC sintético (`id_cidadao`, `data_ficha`, `nome_social`).")
+
+    with st.expander("Histórico de entradas no banco"):
+        st.caption("Cada linha é um momento em que fichas entraram no banco (carga inicial, importação de arquivo "
+                   "ou cadastro na tela). `data_envio` é quando a equipe enviou; `data_entrada`, quando chegou ao banco.")
+        comando_hist = """
+            SELECT f.data_entrada,
+                   COUNT(*)                AS fichas,
+                   COUNT(DISTINCT f.ine)   AS equipes,
+                   MIN(f.data_envio)       AS envio_mais_antigo,
+                   MAX(f.data_envio)       AS envio_mais_recente
+            FROM ficha_cadastro f
+            GROUP BY f.data_entrada
+            ORDER BY f.data_entrada DESC
+            LIMIT 20"""
+        hist = consultar(comando_hist)
+        hist["data_entrada"] = pd.to_datetime(hist["data_entrada"]).dt.tz_convert("America/Recife").dt.strftime("%d/%m/%Y %H:%M:%S")
+        st.dataframe(hist, hide_index=True, width="stretch")
+
+    arquivo = st.file_uploader("Arquivo de fichas", type=["csv", "xlsx"])
+    if arquivo is not None:
+        try:
+            df = ingestao.ler(arquivo, arquivo.name)
+            validas, erros = ingestao.validar(df, ingestao.ines_cadastrados(URL))
+        except ValueError as e:
+            st.error(str(e))
+            st.stop()
+
+        m = st.columns(3)
+        m[0].metric("Linhas no arquivo", f"{len(df):,}".replace(",", "."))
+        m[1].metric("Prontas para gravar", f"{len(validas):,}".replace(",", "."))
+        m[2].metric("Com erro", f"{erros['linha'].nunique():,}".replace(",", "."))
+
+        if len(erros):
+            st.markdown("**Linhas com erro** (não serão gravadas)")
+            st.dataframe(erros, hide_index=True, width="stretch", height=min(35 * (len(erros) + 1), 300))
+            st.download_button("Baixar lista de erros (.csv)", ingestao.erros_csv(erros), "erros_importacao.csv",
+                               "text/csv")
+        if len(validas):
+            with st.expander("Prévia das linhas válidas"):
+                st.dataframe(validas.head(50), hide_index=True, width="stretch")
+
+            chave = (arquivo.name, arquivo.size)
+            if st.session_state.get("importado") == chave:
+                st.info("Este arquivo já foi gravado. Para importar de novo, envie o arquivo outra vez.")
+            elif st.button(f"Gravar {len(validas):,} fichas no banco".replace(",", "."), type="primary"):
+                try:
+                    with st.spinner("Gravando e recalculando os indicadores..."):
+                        r, executados = ingestao.gravar(URL, validas)
+                except psycopg.Error as e:
+                    st.error(f"O banco recusou a importação (nada foi gravado): {e.diag.message_primary or e}")
+                else:
+                    st.session_state["importado"] = chave
+                    st.success(
+                        f"{r['fichas_inseridas']:,} fichas gravadas".replace(",", ".")
+                        + f" em {r['data_entrada'].astimezone(ZoneInfo('America/Recife')):%d/%m/%Y %H:%M:%S}"
+                        + (f" · {r['ja_existiam']:,} já estavam no banco e foram ignoradas".replace(",", ".")
+                           if r["ja_existiam"] else "")
+                        + f" · {r['cidadaos_novos']} cidadãos novos · {r['deficiencias']} indicações de deficiência"
+                        + (f" · indicadores recalculados em {', '.join(r['quadrimestres'])} "
+                           f"({r['indicadores']} equipes)" if r["quadrimestres"] else ""))
+                    if r["quadrimestres"]:
+                        st.dataframe(consultar("""
+                            SELECT v.quadrimestre, COUNT(*) AS equipes, SUM(v.qtd_fichas) AS fichas,
+                                   ROUND(AVG(v.indice_completude), 1) AS indice_medio,
+                                   COUNT(*) FILTER (WHERE v.critica) AS equipes_criticas
+                            FROM vw_indicador_territorio v
+                            WHERE v.quadrimestre = ANY(%(q)s)
+                            GROUP BY v.quadrimestre ORDER BY v.quadrimestre""", {"q": r["quadrimestres"]}),
+                            hide_index=True, width="stretch")
+                    with st.expander("SQL executado"):
+                        st.code(";\n\n".join(executados) + ";", language="sql")

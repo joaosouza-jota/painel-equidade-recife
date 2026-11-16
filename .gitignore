@@ -10,3 +10,6 @@ mlruns/
 mlflow.db
 # macOS
 .DS_Store
+# Segredos (string de conexão do Neon): nunca no repositório
+.streamlit/secrets.toml
+.env

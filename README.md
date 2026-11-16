@@ -57,9 +57,22 @@ streamlit run app/app.py                                   # página "Banco de D
 | `db/carregar_banco.py` | Carga da base do pipeline no banco (INSERT e COPY explícitos) |
 | `db/consultas.py` | As 7 consultas da interface (fonte única do SQL) |
 | `db/consultas.sql` | As mesmas consultas com valores de exemplo, prontas para o psql (gerado por `db/gerar_consultas_sql.py`) |
-| `app/paginas/banco_de_dados.py` | Interface: consultas com gráficos, visualização das tabelas, cadastro de equipes e fichas |
+| `db/ingestao.py` | Importação de fichas por CSV/planilha: validação, gravação e recálculo dos indicadores |
+| `db/gerar_exemplos_ingestao.py` | Arquivos de teste da importação em `data/exemplos/` (a partir da base sintética) |
+| `db/migrar_para_neon.sh` | Copia o banco local inteiro para o Neon e confere tabela por tabela |
+| `db/migracoes/` | Alterações para bancos criados antes de cada mudança (ex.: `data_entrada`) |
+| `app/paginas/banco_de_dados.py` | Interface: consultas com gráficos, tabelas, cadastro de equipes e fichas, importação de arquivo |
 
-A página Banco de Dados só abre com `DATABASE_URL` definida. No painel publicado na nuvem ela mostra um aviso e não toca em banco nenhum.
+`ficha_cadastro.data_envio` é quando a equipe enviou a ficha; `data_entrada` é quando ela entrou no banco (preenchida pelo próprio banco). A aba "Importar arquivo" mostra o histórico de entradas.
+
+#### Banco na nuvem (Neon)
+
+1. Crie um projeto no [Neon](https://neon.tech) (PostgreSQL 17, região São Paulo) e copie a string de conexão **direta** (sem `-pooler`).
+2. Grave em `.streamlit/secrets.toml` (fica fora do GitHub): `DATABASE_URL = "postgresql://...neon.tech/neondb?sslmode=require"`
+3. `bash db/migrar_para_neon.sh`: copia o banco local e confere as contagens.
+4. No Streamlit Cloud: *Settings → Secrets*, a mesma linha do passo 2. A página Banco de Dados passa a funcionar no app publicado.
+
+A página Banco de Dados usa a variável `DATABASE_URL` ou o segredo `DATABASE_URL` do Streamlit. Sem nenhum dos dois, mostra um aviso e não toca em banco nenhum.
 
 ## Documentação
 

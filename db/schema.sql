@@ -26,6 +26,10 @@
 --    (12 letras). A amostra da Etapa 02 não tinha nenhuma; a base completa tem.
 -- 7. Índices em ficha_cadastro (equipe, data, cidadão): a base completa tem
 --    ~770 mil fichas e as consultas filtram e juntam por essas colunas.
+-- 8. ficha_cadastro.data_entrada: quando a ficha ENTROU no banco (carga,
+--    importação de arquivo ou cadastro na tela). Diferente de data_envio,
+--    que é quando a equipe enviou a ficha. Preenchida pelo próprio banco
+--    (DEFAULT now()); todas as fichas de uma importação têm o mesmo valor.
 -- =====================================================================
 
 DROP TABLE IF EXISTS indicador_equipe, quadrimestre,
@@ -123,6 +127,7 @@ CREATE TABLE ficha_cadastro (
     identidade_genero   VARCHAR(12),
     ine                 CHAR(10),
     cod_cidadao         VARCHAR(10)  NOT NULL,
+    data_entrada        TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT pk_ficha_cadastro PRIMARY KEY (id_ficha),
     CONSTRAINT ck_ficha_tipo     CHECK (tipo_ficha IN ('novo', 'atualizacao')),
     CONSTRAINT ck_ficha_situacao CHECK (situacao IN ('ativo', 'mudou_se', 'obito')),
@@ -248,3 +253,82 @@ CREATE TABLE IF NOT EXISTS respostas_sinteticas (
     CONSTRAINT ck_resp_os_regra  CHECK ((informa_orientacao_sexual = 'Sim') = (orientacao_sexual IS NOT NULL)),
     CONSTRAINT ck_resp_ig_regra  CHECK ((informa_identidade_genero = 'Sim') = (identidade_genero IS NOT NULL))
 );
+
+-- =====================================================================
+-- Etapa 04 · índices e visões
+-- (o comentário completo de cada um está em
+--  entregas/extra_minimundo-banco-de-dados/etapa-04/)
+-- =====================================================================
+
+-- Índice parcial: só fichas de pessoas trans, travestis e não binárias
+-- (~0,6% da tabela). Consulta de equipes que nunca registram esse grupo.
+CREATE INDEX ix_ficha_genero_diverso
+    ON ficha_cadastro (ine, data_envio)
+    WHERE identidade_genero IN ('mulher_trans', 'homem_trans', 'travesti', 'nao_binario');
+
+-- Caminho inverso da PK de ficha_deficiencia ("quais fichas têm este tipo")
+-- e checagem da FK ao excluir um tipo.
+CREATE INDEX ix_fd_tipo ON ficha_deficiencia (id_tipo_deficiencia);
+
+-- Visão 1: indicador da equipe já situado no território
+CREATE OR REPLACE VIEW vw_indicador_territorio AS
+SELECT i.ine,
+       e.nome                    AS equipe,
+       u.cnes,
+       u.nome                    AS unidade,
+       b.nome                    AS bairro,
+       b.nr_distrito             AS distrito,
+       q.id_quadrimestre,
+       q.ano,
+       q.numero,
+       q.ano || '.' || q.numero  AS quadrimestre,
+       i.qtd_fichas,
+       i.indice_completude,
+       i.critica,
+       i.risco_previsto
+FROM indicador_equipe i
+JOIN quadrimestre  q ON q.id_quadrimestre = i.id_quadrimestre
+JOIN equipe        e ON e.ine = i.ine
+JOIN unidade_saude u ON u.cnes = e.cnes
+JOIN bairro        b ON b.id_bairro = u.id_bairro;
+
+-- Visão 2: cada ficha com o estado de cada marcador (Preenchido / Recusou / N/I)
+CREATE OR REPLACE VIEW vw_ficha_marcadores AS
+SELECT f.id_ficha,
+       f.cod_cidadao,
+       f.data_envio,
+       q.ano,
+       q.numero,
+       q.ano || '.' || q.numero  AS quadrimestre,
+       f.tipo_ficha,
+       f.situacao,
+       f.idade,
+       f.sexo,
+       f.raca_cor,
+       f.orientacao_sexual,
+       f.identidade_genero,
+       f.tem_deficiencia,
+       CASE WHEN f.idade <= 10                   THEN NULL
+            WHEN f.deseja_informar_os = 'sim'    THEN 'Preenchido'
+            WHEN f.deseja_informar_os = 'nao'    THEN 'Recusou'
+            ELSE 'N/I' END                       AS estado_orientacao,
+       CASE WHEN f.idade <= 10                   THEN NULL
+            WHEN f.deseja_informar_ig = 'sim'    THEN 'Preenchido'
+            WHEN f.deseja_informar_ig = 'nao'    THEN 'Recusou'
+            ELSE 'N/I' END                       AS estado_identidade,
+       CASE WHEN f.raca_cor IS NULL              THEN 'N/I'
+            ELSE 'Preenchido' END                AS estado_raca,
+       CASE WHEN f.tem_deficiencia IS NULL       THEN 'N/I'
+            ELSE 'Preenchido' END                AS estado_deficiencia,
+       f.ine,
+       e.nome                    AS equipe,
+       u.cnes,
+       u.nome                    AS unidade,
+       b.nome                    AS bairro,
+       b.nr_distrito             AS distrito,
+       f.data_entrada
+FROM ficha_cadastro f
+JOIN quadrimestre  q ON f.data_envio BETWEEN q.data_inicio AND q.data_fim
+JOIN equipe        e ON e.ine = f.ine
+JOIN unidade_saude u ON u.cnes = e.cnes
+JOIN bairro        b ON b.id_bairro = u.id_bairro;
