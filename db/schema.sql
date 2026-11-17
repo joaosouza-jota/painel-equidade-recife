@@ -32,7 +32,7 @@
 --    (DEFAULT now()); todas as fichas de uma importação têm o mesmo valor.
 -- =====================================================================
 
-DROP TABLE IF EXISTS indicador_equipe, quadrimestre,
+DROP TABLE IF EXISTS log_ficha_cadastro, agenda_apoio, indicador_equipe, quadrimestre,
     ficha_deficiencia, tipo_deficiencia, ficha_cadastro, cidadao, equipe,
     unidade_saude, bairro CASCADE;
 DROP SEQUENCE IF EXISTS seq_bairro, seq_tipo_deficiencia,
@@ -332,3 +332,442 @@ JOIN quadrimestre  q ON f.data_envio BETWEEN q.data_inicio AND q.data_fim
 JOIN equipe        e ON e.ine = f.ine
 JOIN unidade_saude u ON u.cnes = e.cnes
 JOIN bairro        b ON b.id_bairro = u.id_bairro;
+
+
+-- =====================================================================
+-- Etapa 05 · funções, procedimentos e triggers
+-- (justificativas completas em entregas/extra_minimundo-banco-de-dados/etapa-05/)
+-- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- 1 · fn_estado_marcador · estado do registro de um marcador de equidade
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: o projeto inteiro gira em torno de uma regra
+-- de três estados para cada marcador da ficha:
+--   Preenchido = a equipe perguntou e registrou a resposta;
+--   Recusou    = a equipe perguntou e a pessoa não quis informar;
+--   N/I        = a equipe não registrou (falha da equipe, o que o painel mede).
+-- Crianças de 0 a 10 anos ficam FORA de orientação sexual e identidade
+-- de gênero (a ficha e-SUS não faz essas perguntas para elas): NULL.
+-- E a regra muda conforme o marcador: em orientação e identidade a
+-- recusa existe (campo deseja_informar = 'nao'); em raça/cor e
+-- deficiência não existe recusa, e tem_deficiencia = 'nao' é uma
+-- resposta preenchida ("não tem deficiência"), não uma recusa.
+-- Errar essa regra num lugar e acertar noutro muda quem aparece como
+-- equipe crítica. A função fixa a regra num ponto só do banco.
+--
+-- Estrutura condicional: IF / ELSIF / ELSE em dois níveis (o marcador e,
+-- dentro dele, a idade e a resposta). Marcador desconhecido gera erro,
+-- em vez de devolver um estado errado em silêncio.
+--
+-- IMMUTABLE: a resposta depende só dos parâmetros (mesma entrada, mesma
+-- saída), o que deixa o PostgreSQL reaproveitar o resultado.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_estado_marcador(
+    p_marcador  TEXT,       -- 'orientacao', 'identidade', 'raca' ou 'deficiencia'
+    p_resposta  TEXT,       -- orientação/identidade: deseja_informar ('sim'/'nao'/NULL)
+                            -- raça/deficiência: o próprio campo (raca_cor, tem_deficiencia)
+    p_idade     INTEGER
+)
+RETURNS VARCHAR(10)
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    IF p_marcador IN ('orientacao', 'identidade') THEN
+        IF p_idade <= 10 THEN
+            RETURN NULL;                      -- criança: fora do marcador
+        ELSIF p_resposta = 'sim' THEN
+            RETURN 'Preenchido';
+        ELSIF p_resposta = 'nao' THEN
+            RETURN 'Recusou';
+        ELSE
+            RETURN 'N/I';                     -- a equipe não registrou
+        END IF;
+
+    ELSIF p_marcador IN ('raca', 'deficiencia') THEN
+        IF p_resposta IS NULL THEN
+            RETURN 'N/I';
+        ELSE
+            RETURN 'Preenchido';              -- inclui tem_deficiencia = 'nao'
+        END IF;
+
+    ELSE
+        RAISE EXCEPTION 'Marcador desconhecido: % (use orientacao, identidade, raca ou deficiencia)', p_marcador;
+    END IF;
+END;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 2 · fn_indice_completude · índice de completude de UMA equipe em UM
+--     quadrimestre, calculado na hora a partir das fichas
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: o índice de completude é o número central do
+-- painel (0 a 100; quanto maior, mais a equipe registra os marcadores).
+-- Ele fica gravado em indicador_equipe.indice_completude, mas o valor
+-- gravado é uma FOTO: se uma ficha for corrigida na tela Banco de Dados,
+-- a foto fica velha. Esta função responde "quanto a equipe X tem HOJE no
+-- quadrimestre Y", direto das fichas, e é usada pelo procedimento que
+-- atualiza os indicadores (02_procedimentos.sql).
+--
+-- Fórmula (a mesma do projeto desde a Etapa 03):
+--   índice = 100 × (2·OS + 2·IG + Raça + Deficiência) / 6
+--   OS, IG     = fração "Preenchido" entre as pessoas com mais de 10 anos
+--                (peso 2: são os marcadores que o projeto quer melhorar)
+--   Raça, Def. = fração "Preenchido" entre todas as fichas
+-- O estado de cada ficha vem de fn_estado_marcador (função 1): a regra
+-- de Preenchido / Recusou / N/I não é reescrita aqui.
+--
+-- Equipe sem nenhuma pessoa acima de 10 anos no período: OS e IG valem 0
+-- (COALESCE). Equipe sem nenhuma ficha no período: devolve NULL.
+-- STABLE: lê tabelas, então o resultado só é garantido dentro do mesmo
+-- comando.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_indice_completude(
+    p_ine              CHAR(10),
+    p_id_quadrimestre  INTEGER
+)
+RETURNS NUMERIC(5,2)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT ROUND(100 * (
+              2 * COALESCE(AVG(CASE WHEN fn_estado_marcador('orientacao', f.deseja_informar_os, f.idade) = 'Preenchido'
+                                    THEN 1 ELSE 0 END) FILTER (WHERE f.idade > 10), 0)
+            + 2 * COALESCE(AVG(CASE WHEN fn_estado_marcador('identidade', f.deseja_informar_ig, f.idade) = 'Preenchido'
+                                    THEN 1 ELSE 0 END) FILTER (WHERE f.idade > 10), 0)
+            +     AVG(CASE WHEN fn_estado_marcador('raca', f.raca_cor, f.idade) = 'Preenchido'
+                           THEN 1 ELSE 0 END)
+            +     AVG(CASE WHEN fn_estado_marcador('deficiencia', f.tem_deficiencia, f.idade) = 'Preenchido'
+                           THEN 1 ELSE 0 END)
+           ) / 6, 2)
+    FROM ficha_cadastro f
+    JOIN quadrimestre   q ON f.data_envio BETWEEN q.data_inicio AND q.data_fim
+    WHERE f.ine = p_ine
+      AND q.id_quadrimestre = p_id_quadrimestre;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 1 · pr_recalcular_indicadores · ATUALIZAÇÃO de dados
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: indicador_equipe guarda, por equipe e
+-- quadrimestre, a quantidade de fichas, o índice de completude e se a
+-- equipe está crítica. Esses valores são calculados das fichas, então
+-- ficam desatualizados quando uma ficha do período é corrigida ou
+-- excluída na tela Banco de Dados, ou quando chegam fichas atrasadas.
+-- O procedimento recalcula um quadrimestre inteiro:
+--   1. UPDATE de qtd_fichas e indice_completude das equipes que já têm
+--      indicador (índice vindo de fn_indice_completude, função 2);
+--   2. INSERT das equipes que passaram a ter fichas no período;
+--   3. UPDATE de "critica": a equipe é crítica quando o índice fica no
+--      quartil inferior do quadrimestre (≤ percentil 25). Como o P25
+--      depende de TODAS as equipes, corrigir uma ficha de uma equipe
+--      pode mudar quem é crítica nas outras: por isso o recálculo é do
+--      quadrimestre inteiro, e não de uma equipe só.
+-- risco_previsto não é tocado: quem grava o risco é o modelo de ML
+-- (pipeline do projeto).
+--
+-- Uso:  CALL pr_recalcular_indicadores(2026, 2);
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE pr_recalcular_indicadores(p_ano INTEGER, p_numero INTEGER)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_quad         quadrimestre%ROWTYPE;
+    v_atualizadas  INTEGER;
+    v_novas        INTEGER;
+    v_criticas     INTEGER;
+BEGIN
+    SELECT * INTO v_quad FROM quadrimestre WHERE ano = p_ano AND numero = p_numero;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Quadrimestre %.% não está cadastrado', p_ano, p_numero;
+    END IF;
+
+    -- 1. equipes que já tinham indicador no quadrimestre
+    UPDATE indicador_equipe i
+       SET qtd_fichas        = c.qtd,
+           indice_completude = fn_indice_completude(i.ine, v_quad.id_quadrimestre)
+      FROM (SELECT f.ine, COUNT(*) AS qtd
+              FROM ficha_cadastro f
+             WHERE f.data_envio BETWEEN v_quad.data_inicio AND v_quad.data_fim
+               AND f.ine IS NOT NULL
+             GROUP BY f.ine) c
+     WHERE i.ine = c.ine
+       AND i.id_quadrimestre = v_quad.id_quadrimestre;
+    GET DIAGNOSTICS v_atualizadas = ROW_COUNT;
+
+    -- 2. equipes que passaram a ter fichas no período
+    INSERT INTO indicador_equipe (ine, id_quadrimestre, qtd_fichas, indice_completude)
+    SELECT c.ine, v_quad.id_quadrimestre, c.qtd, fn_indice_completude(c.ine, v_quad.id_quadrimestre)
+      FROM (SELECT f.ine, COUNT(*) AS qtd
+              FROM ficha_cadastro f
+             WHERE f.data_envio BETWEEN v_quad.data_inicio AND v_quad.data_fim
+               AND f.ine IS NOT NULL
+             GROUP BY f.ine) c
+     WHERE NOT EXISTS (SELECT 1 FROM indicador_equipe i
+                        WHERE i.ine = c.ine AND i.id_quadrimestre = v_quad.id_quadrimestre);
+    GET DIAGNOSTICS v_novas = ROW_COUNT;
+
+    -- 3. quem está crítica (quartil inferior do quadrimestre)
+    UPDATE indicador_equipe i
+       SET critica = (i.indice_completude <= l.limite)
+      FROM (SELECT PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY indice_completude) AS limite
+              FROM indicador_equipe
+             WHERE id_quadrimestre = v_quad.id_quadrimestre) l
+     WHERE i.id_quadrimestre = v_quad.id_quadrimestre;
+
+    SELECT COUNT(*) FILTER (WHERE critica) INTO v_criticas
+      FROM indicador_equipe WHERE id_quadrimestre = v_quad.id_quadrimestre;
+
+    RAISE NOTICE 'Quadrimestre %.%: % indicadores atualizados, % novos, % equipes críticas',
+                 p_ano, p_numero, v_atualizadas, v_novas, v_criticas;
+END;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 2 · pr_agendar_apoio · procedimento com CURSOR
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: o painel aponta as equipes com risco de ficar
+-- críticas no próximo quadrimestre (risco_previsto ≥ 0,5, gravado pelo
+-- modelo de ML). A ação da gestão sobre elas é o APOIO INSTITUCIONAL:
+-- o apoiador do Distrito Sanitário senta com a equipe para rever como
+-- ela pergunta e registra os marcadores. Cada apoiador tem um número
+-- fixo de horas por semana (padrão: 20 h). O procedimento monta a agenda
+-- do próximo quadrimestre:
+--   - equipes em ordem de prioridade (maior risco primeiro);
+--   - horas de apoio conforme a gravidade (índice < 40 → 8 h;
+--     < 45 → 6 h; o resto → 4 h);
+--   - cada equipe vai para a PRIMEIRA semana do seu distrito que ainda
+--     tem horas livres suficientes (first-fit). Uma equipe de 4 h pode
+--     ocupar a sobra de uma semana anterior que não coube uma de 8 h.
+--
+-- Por que precisa de cursor (e não dá para fazer com um UPDATE ou um
+-- INSERT ... SELECT):
+--   A semana de cada equipe depende das horas JÁ OCUPADAS pelas equipes
+--   que vieram antes dela, e essa ocupação só existe depois que as
+--   equipes anteriores foram colocadas. É um processo sequencial: a
+--   decisão da linha N depende do resultado das linhas 1 a N-1.
+--   Um único UPDATE/INSERT enxerga a tabela como ela estava ANTES do
+--   comando (o PostgreSQL lê de uma "foto" do início do comando), então
+--   não consegue ver as próprias colocações. Contar a posição com
+--   ROW_NUMBER também não resolve, porque as equipes têm tamanhos
+--   diferentes (4, 6 ou 8 h) e a ordem de chegada muda o encaixe.
+--   O cursor percorre as equipes uma a uma, na ordem de prioridade, e a
+--   cada FETCH consulta a agenda já montada.
+--
+-- Rodar de novo para o mesmo quadrimestre refaz a agenda do zero (o
+-- risco pode ter mudado depois de uma nova execução da pipeline).
+--
+-- Uso:  CALL pr_agendar_apoio(2026, 2);        -- 20 h por semana
+--       CALL pr_agendar_apoio(2026, 2, 16);    -- 16 h por semana
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS agenda_apoio (
+    id_agenda        SERIAL        NOT NULL,
+    id_quadrimestre  INTEGER       NOT NULL,       -- quadrimestre cujo risco gerou a agenda
+    ine              CHAR(10)      NOT NULL,
+    nr_distrito      SMALLINT      NOT NULL,
+    semana           SMALLINT      NOT NULL,       -- 1 = primeira semana do quadrimestre seguinte
+    inicio_semana    DATE          NOT NULL,
+    horas            SMALLINT      NOT NULL,
+    risco_previsto   NUMERIC(5,4)  NOT NULL,
+    criado_em        TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    CONSTRAINT pk_agenda_apoio    PRIMARY KEY (id_agenda),
+    CONSTRAINT uq_agenda_equipe   UNIQUE (id_quadrimestre, ine),
+    CONSTRAINT ck_agenda_semana   CHECK (semana >= 1),
+    CONSTRAINT ck_agenda_horas    CHECK (horas IN (4, 6, 8)),
+    CONSTRAINT fk_agenda_quad     FOREIGN KEY (id_quadrimestre)
+        REFERENCES quadrimestre (id_quadrimestre) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agenda_equipe   FOREIGN KEY (ine)
+        REFERENCES equipe (ine) ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE OR REPLACE PROCEDURE pr_agendar_apoio(p_ano INTEGER, p_numero INTEGER, p_horas_semana INTEGER DEFAULT 20)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_quad      quadrimestre%ROWTYPE;
+    v_inicio    DATE;            -- primeira segunda-feira do quadrimestre seguinte
+    v_horas     SMALLINT;
+    v_semana    INTEGER;
+    v_total     INTEGER := 0;
+    r           RECORD;
+
+    -- equipes em risco, da mais urgente para a menos urgente
+    c_equipes CURSOR (p_id INTEGER) FOR
+        SELECT i.ine, b.nr_distrito, i.indice_completude, i.risco_previsto
+          FROM indicador_equipe i
+          JOIN equipe        e ON e.ine = i.ine
+          JOIN unidade_saude u ON u.cnes = e.cnes
+          JOIN bairro        b ON b.id_bairro = u.id_bairro
+         WHERE i.id_quadrimestre = p_id
+           AND i.risco_previsto >= 0.5
+         ORDER BY i.risco_previsto DESC, i.indice_completude, i.ine;
+BEGIN
+    IF p_horas_semana < 8 THEN
+        RAISE EXCEPTION 'O apoiador precisa de pelo menos 8 h por semana (a maior carga de uma equipe)';
+    END IF;
+
+    SELECT * INTO v_quad FROM quadrimestre WHERE ano = p_ano AND numero = p_numero;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Quadrimestre %.% não está cadastrado', p_ano, p_numero;
+    END IF;
+    v_inicio := date_trunc('week', v_quad.data_fim + 7)::date;   -- 1ª segunda-feira depois do fim
+
+    DELETE FROM agenda_apoio WHERE id_quadrimestre = v_quad.id_quadrimestre;   -- refaz do zero
+
+    OPEN c_equipes(v_quad.id_quadrimestre);
+    LOOP
+        FETCH c_equipes INTO r;
+        EXIT WHEN NOT FOUND;
+
+        v_horas := CASE WHEN r.indice_completude < 40 THEN 8
+                        WHEN r.indice_completude < 45 THEN 6
+                        ELSE 4 END;
+
+        -- first-fit: primeira semana do distrito em que a equipe ainda cabe,
+        -- olhando a agenda que as equipes anteriores do cursor já ocuparam
+        SELECT MIN(s.semana) INTO v_semana
+          FROM generate_series(1, (SELECT COALESCE(MAX(a.semana), 0) + 1
+                                     FROM agenda_apoio a
+                                    WHERE a.id_quadrimestre = v_quad.id_quadrimestre
+                                      AND a.nr_distrito = r.nr_distrito)) AS s(semana)
+         WHERE (SELECT COALESCE(SUM(a.horas), 0)
+                  FROM agenda_apoio a
+                 WHERE a.id_quadrimestre = v_quad.id_quadrimestre
+                   AND a.nr_distrito = r.nr_distrito
+                   AND a.semana = s.semana) + v_horas <= p_horas_semana;
+
+        INSERT INTO agenda_apoio (id_quadrimestre, ine, nr_distrito, semana, inicio_semana, horas, risco_previsto)
+        VALUES (v_quad.id_quadrimestre, r.ine, r.nr_distrito, v_semana,
+                v_inicio + 7 * (v_semana - 1), v_horas, r.risco_previsto);
+        v_total := v_total + 1;
+    END LOOP;
+    CLOSE c_equipes;
+
+    RAISE NOTICE 'Agenda de apoio após %.%: % equipes, até a semana %',
+                 p_ano, p_numero, v_total,
+                 (SELECT MAX(semana) FROM agenda_apoio WHERE id_quadrimestre = v_quad.id_quadrimestre);
+END;
+$$;
+--
+-- Os dois triggers ficam em ficha_cadastro porque a tela Banco de Dados
+-- do painel deixa ALTERAR os marcadores de uma ficha e EXCLUIR uma ficha
+-- (app/paginas/banco_de_dados.py). São as duas operações que precisam
+-- de controle.
+-- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- 1 · trg_ficha_log · tabela de LOG das alterações e exclusões de fichas
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: a ficha guarda dado pessoal SENSÍVEL
+-- (orientação sexual, identidade de gênero, raça/cor, deficiência). A
+-- LGPD (art. 37) pede registro das operações de tratamento desse dado,
+-- e a Secretaria precisa saber quem mudou o quê e quando: uma correção
+-- muda o índice da equipe e pode tirá-la (ou colocá-la) na lista de
+-- críticas. O trigger grava em log_ficha_cadastro, para cada UPDATE ou
+-- DELETE de ficha:
+--   - quando e qual usuário do banco fez a operação;
+--   - quais campos mudaram (só os que mudaram de fato);
+--   - a ficha antes e depois, em JSON. Numa exclusão, o "antes" é o
+--     que permite reconstruir a ficha apagada.
+-- UPDATE que não muda nada (mesmos valores) não gera linha de log.
+-- INSERT não entra: a ficha nova já registra a entrada em data_entrada,
+-- e uma importação de milhares de fichas encheria o log sem informação.
+-- AFTER: só registra o que de fato foi gravado (se a operação falhar
+-- numa restrição, não sobra log de algo que não aconteceu).
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS log_ficha_cadastro (
+    id_log            BIGSERIAL     NOT NULL,
+    momento           TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    usuario           TEXT          NOT NULL DEFAULT current_user,
+    operacao          VARCHAR(6)    NOT NULL,
+    id_ficha          BIGINT        NOT NULL,      -- sem FK: a ficha pode ter sido excluída
+    ine               CHAR(10),
+    campos_alterados  TEXT[],
+    antes             JSONB         NOT NULL,
+    depois            JSONB,
+    CONSTRAINT pk_log_ficha     PRIMARY KEY (id_log),
+    CONSTRAINT ck_log_operacao  CHECK (operacao IN ('UPDATE', 'DELETE'))
+);
+CREATE INDEX IF NOT EXISTS ix_log_ficha ON log_ficha_cadastro (id_ficha, momento);
+
+CREATE OR REPLACE FUNCTION fn_trg_ficha_log()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_campos TEXT[];
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        SELECT array_agg(n.key ORDER BY n.key) INTO v_campos
+          FROM jsonb_each(to_jsonb(NEW)) AS n
+         WHERE n.value IS DISTINCT FROM to_jsonb(OLD) -> n.key;
+
+        IF v_campos IS NULL THEN
+            RETURN NULL;                     -- nada mudou de fato
+        END IF;
+
+        INSERT INTO log_ficha_cadastro (operacao, id_ficha, ine, campos_alterados, antes, depois)
+        VALUES ('UPDATE', OLD.id_ficha, OLD.ine, v_campos, to_jsonb(OLD), to_jsonb(NEW));
+    ELSE
+        INSERT INTO log_ficha_cadastro (operacao, id_ficha, ine, antes)
+        VALUES ('DELETE', OLD.id_ficha, OLD.ine, to_jsonb(OLD));
+    END IF;
+    RETURN NULL;                             -- AFTER: o retorno é ignorado
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_ficha_log ON ficha_cadastro;
+CREATE TRIGGER trg_ficha_log
+    AFTER UPDATE OR DELETE ON ficha_cadastro
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_trg_ficha_log();
+
+
+-- ---------------------------------------------------------------------
+-- 2 · trg_ficha_sem_deficiencia · coerência entre a ficha e os tipos
+--     de deficiência
+-- ---------------------------------------------------------------------
+-- Justificativa semântica: os tipos de deficiência de uma ficha (surdez,
+-- baixa visão, TEA...) ficam em ficha_deficiencia, e só fazem sentido se
+-- a ficha diz tem_deficiencia = 'sim'. Na tela Banco de Dados, a equipe
+-- pode corrigir uma ficha de 'sim' para 'nao' (marcou errado) ou para
+-- vazio. Sem o trigger, os tipos antigos continuariam lá, e a pessoa
+-- continuaria sendo contada como surda ou com deficiência física na
+-- consulta de demanda de Libras (Etapa 04) e no painel de populações.
+--
+-- Por que trigger e não CHECK: a regra cruza duas tabelas (o CHECK só
+-- enxerga a própria linha) e a FK só garante que a ficha existe, não o
+-- que ela diz.
+--
+-- O trigger dispara só quando tem_deficiencia muda de 'sim' para outra
+-- coisa (cláusula WHEN), apaga os tipos que ficaram sem sentido e avisa
+-- quantos apagou. A mudança da ficha em si fica registrada pelo
+-- trigger 1 (log).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_trg_ficha_sem_deficiencia()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_apagados INTEGER;
+BEGIN
+    DELETE FROM ficha_deficiencia WHERE id_ficha = NEW.id_ficha;
+    GET DIAGNOSTICS v_apagados = ROW_COUNT;
+    RAISE NOTICE 'Ficha %: tem_deficiencia deixou de ser "sim"; % tipo(s) de deficiência removido(s)',
+                 NEW.id_ficha, v_apagados;
+    RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_ficha_sem_deficiencia ON ficha_cadastro;
+CREATE TRIGGER trg_ficha_sem_deficiencia
+    AFTER UPDATE OF tem_deficiencia ON ficha_cadastro
+    FOR EACH ROW
+    WHEN (OLD.tem_deficiencia = 'sim' AND NEW.tem_deficiencia IS DISTINCT FROM 'sim')
+    EXECUTE FUNCTION fn_trg_ficha_sem_deficiencia();
