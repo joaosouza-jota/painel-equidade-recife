@@ -68,6 +68,20 @@ streamlit run app/app.py                                   # página "Banco de D
 
 `ficha_cadastro.data_envio` é quando a equipe enviou a ficha; `data_entrada` é quando ela entrou no banco (preenchida pelo próprio banco). A aba "Importar arquivo" mostra o histórico de entradas.
 
+#### Versão final da interface (Banco de Dados · Etapa 06)
+
+Tudo roda no mesmo banco e no mesmo app. Mapa do enunciado:
+
+| Requisito | Onde está no app |
+|---|---|
+| CRUD em pelo menos 4 tabelas | Página **Banco de Dados**, abas **Equipes** (`equipe`), **Unidades de saúde** (`unidade_saude`), **Tipos de deficiência** (`tipo_deficiencia`) e **Fichas de cadastro** (`ficha_cadastro`, que grava também `cidadao` e `ficha_deficiencia` na mesma transação). Inserir, alterar e excluir; as recusas do banco (CHECK, UNIQUE, ON DELETE RESTRICT) aparecem na tela |
+| Funções, procedimentos e triggers (Etapa 05) | Aba **Funções, procedimentos e triggers**: `fn_estado_marcador` (testar valores, inclusive o erro de marcador inválido, e ver a função aplicada às fichas), `fn_indice_completude` (função × valor gravado, por quadrimestre), `CALL pr_recalcular_indicadores` (antes/depois + RAISE NOTICE), `CALL pr_agendar_apoio` (agenda do apoiador em gráfico), triggers `trg_ficha_log` e `trg_ficha_sem_deficiencia` (demonstração em transação desfeita + log real das alterações feitas na aba Fichas) |
+| Consultas e visões (Etapas 03 e 04) com filtros e gráficos | Aba **Consultas e gráficos**, grupos *Etapa 03* (7 consultas), *Etapa 04* (anti join, full outer join, 2 com subconsultas) e *Visões* (`vw_indicador_territorio`, `vw_ficha_marcadores`). Filtros: quadrimestre e distrito na barra lateral, mais grupo, tipos de deficiência e limite em pp conforme a consulta. Cada uma mostra gráfico, tabela e o SQL executado. As visões também aparecem na aba **Tabelas e visões** |
+| Dashboard estatístico sobre os dados do banco | Página **Dashboard** (`app/paginas/dashboard.py`): 8 indicadores resumidos com variação para o quadrimestre anterior; média, mediana, moda, variância, desvio padrão, coeficiente de variação e quartis de 4 variáveis, **calculados pelo PostgreSQL** (AVG, PERCENTILE_CONT, MODE, VAR_SAMP, STDDEV_SAMP); 8 gráficos: tendência temporal (linha), histograma com média/mediana/moda, dispersão por distrito (boxplot), frequência do estado do registro (barras empilhadas), composição por raça/cor (rosca), correlação fichas × índice com reta de regressão (CORR, REGR_SLOPE), série mensal com média móvel (janela) e pirâmide etária. Filtros de período e distritos valem para a página inteira; legendas clicáveis e zoom nos gráficos |
+| Extra: formulário para as equipes, conectado ao banco | Página **Formulário da equipe** (`app/paginas/formulario.py`): a equipe escolhe distrito → unidade → equipe e preenche a ficha (identificação + marcadores de equidade). Campos aparecem conforme as respostas (criança não vê orientação/identidade; tipos de deficiência só com "sim"); raça/cor, deficiência e "deseja informar?" são obrigatórios (o formulário não gera N/I); confere tudo antes de enviar; grava cidadão, ficha e tipos numa transação e devolve o número da ficha. Mostra o índice da equipe no quadrimestre atual calculado na hora por `fn_indice_completude` e as últimas fichas com `fn_estado_marcador` |
+
+Consultas novas da Etapa 04 ficaram em `db/consultas.py` (fonte única), parametrizadas pelo quadrimestre e distrito da tela.
+
 #### Pipeline automatizada
 
 ```
