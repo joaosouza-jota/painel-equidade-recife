@@ -10,6 +10,78 @@ Projeto 3 (Dados) + Machine Learning I · CESAR School · 2026.2 · Cliente: Sec
 
 > **Base de dados sintética.** A Secretaria não liberou os dados reais do PEC. O projeto usa uma base gerada por código, no formato do PEC (ver `docs/contrato_dados.md`). Quando a extração real existir nesse formato, o pipeline roda sem mudanças.
 
+## Projeto de Banco de Dados (Parte 02): onde está cada requisito
+
+Mapa dos itens do enunciado "BD Projeto - Parte 02" (Etapas 04, 05 e 06) até o lugar exato no projeto, com o que cada um faz aqui. Todo o SQL do banco está em [`db/schema.sql`](db/schema.sql); as consultas da interface, em [`db/consultas.py`](db/consultas.py). No app, a página **Banco de Dados** tem uma aba para cada parte, e todo resultado vem acompanhado do **SQL executado**.
+
+**Contexto do domínio:** as equipes de Saúde da Família do Recife preenchem a Ficha de Cadastro Individual do e-SUS. A Secretaria de Saúde precisa saber quais equipes deixam de registrar os marcadores de equidade (raça/cor, deficiência, orientação sexual, identidade de gênero). Cada marcador fica em um de três estados: **Preenchido**, **Recusou** (a pessoa não quis informar) ou **N/I** (a equipe não registrou). O N/I é a falha que o sistema mede.
+
+### Etapa 04 · Consultas avançadas, visões e índices
+
+**Índices** (2 novos, usados pelas consultas abaixo)
+
+| Requisito | Onde | O que faz no projeto |
+|---|---|---|
+| Índice 1 | [`ix_ficha_genero_diverso`](db/schema.sql#L265) | Índice **parcial** em `ficha_cadastro (ine, data_envio)`, só com as fichas de pessoas trans, travestis e não binárias (~0,6% da tabela). Faz a consulta anti join (8) achar, equipe por equipe, se existe algum registro do grupo sem varrer as 770 mil fichas. |
+| Índice 2 | [`ix_fd_tipo`](db/schema.sql#L271) | Índice em `ficha_deficiencia (id_tipo_deficiencia)`: o caminho "quais fichas têm este tipo de deficiência". Usado pela consulta 10 (onde vivem as pessoas surdas) e pela checagem da chave estrangeira ao excluir um tipo. |
+
+**Consultas** (4 novas, todas parametrizadas na interface: aba *Consultas e gráficos* → grupo *Etapa 04*)
+
+| Requisito | Onde | O que faz no projeto |
+|---|---|---|
+| Anti join | [`anti_join`](db/consultas.py#L244) · consulta 8 | `LEFT JOIN ... WHERE f.id_ficha IS NULL`: lista as equipes que mandaram centenas de fichas em 12 meses e **nenhuma** registra pessoa trans, travesti ou não binária. É sinal de que a pergunta não está sendo feita: candidata a oficina. |
+| Full outer join | [`full_outer`](db/consultas.py#L273) · consulta 9 | Compara a identidade de gênero **esperada** no distrito (base proxy da Inferência Estatística, `respostas_sinteticas`) com a **registrada** nas fichas. O FULL OUTER JOIN mantém as categorias que só aparecem de um lado, que um INNER JOIN esconderia. |
+| Subconsulta 1 | [`libras`](db/consultas.py#L320) · consulta 10 | `IN` aninhado em 2 níveis (nome do tipo → id → fichas) + subconsulta escalar correlacionada (ficha mais recente do cidadão). Mostra as unidades com mais pessoas ativas do tipo de deficiência escolhido, por exemplo surdez, para decidir onde ter intérprete de Libras. |
+| Subconsulta 2 | [`persistentes`](db/consultas.py#L350) · consulta 11 | `IN` com `GROUP BY / HAVING BOOL_AND` + 2 subconsultas escalares correlacionadas: equipes críticas nos 3 últimos quadrimestres seguidos (problema estrutural), com quantas vezes cada uma foi crítica no histórico. |
+
+**Visões** (2, com 4 joins cada)
+
+| Requisito | Onde | Justificativa semântica |
+|---|---|---|
+| Visão 1 | [`vw_indicador_territorio`](db/schema.sql#L274) | Junta `indicador_equipe`, `quadrimestre`, `equipe`, `unidade_saude` e `bairro`: o indicador de cada equipe já situado no território (distrito → unidade → equipe), na linguagem da gestão. É a base do ranking, do dashboard e das consultas 8 e 11. |
+| Visão 2 | [`vw_ficha_marcadores`](db/schema.sql#L296) | Cada ficha com o estado de cada marcador (Preenchido / Recusou / N/I) e a exclusão das crianças de 0 a 10 anos das perguntas de orientação e identidade. Fixa num lugar só uma regra que, se errada, muda quem aparece como equipe crítica. |
+
+### Etapa 05 · Funções, procedimentos e triggers
+
+| Requisito | Onde | O que faz no projeto |
+|---|---|---|
+| Função 1 (com estrutura condicional) | [`fn_estado_marcador(marcador, resposta, idade)`](db/schema.sql#L367) | Devolve Preenchido, Recusou, N/I ou NULL (criança fora do marcador). Usa `IF / ELSIF / ELSE` em dois níveis, porque a regra muda conforme o marcador: em raça/cor e deficiência não existe recusa. Marcador desconhecido gera `RAISE EXCEPTION`. |
+| Função 2 | [`fn_indice_completude(ine, id_quadrimestre)`](db/schema.sql#L428) | Calcula na hora, direto das fichas, o índice de completude (0 a 100) de uma equipe num quadrimestre. Serve para conferir o valor gravado e para mostrar à equipe o índice atualizado no momento em que ela envia uma ficha. |
+| Procedimento de atualização | [`pr_recalcular_indicadores(ano, numero)`](db/schema.sql#L475) | `UPDATE` da quantidade de fichas e do índice de cada equipe, `INSERT` das equipes que passaram a ter fichas no período e `UPDATE` de quem é crítica (25% piores do quadrimestre). |
+| Procedimento com cursor | [`pr_agendar_apoio(ano, numero, horas_semana)`](db/schema.sql#L588) | Monta a agenda semanal do apoiador de cada distrito para as equipes em risco (tabela [`agenda_apoio`](db/schema.sql#L568)). O cursor percorre as equipes da mais urgente para a menos urgente e encaixa cada uma na primeira semana com horas livres (*first-fit*). **Por que precisa de cursor:** a semana de cada equipe depende das horas já ocupadas pelas anteriores. Um `UPDATE` ou `INSERT ... SELECT` só enxerga a tabela como ela estava antes do comando, então não vê as próprias colocações. |
+| Trigger 1 (atualiza tabela de log) | [`trg_ficha_log`](db/schema.sql#L726) + [`fn_trg_ficha_log`](db/schema.sql#L699) | Depois de cada alteração ou exclusão de ficha, grava em [`log_ficha_cadastro`](db/schema.sql#L684) quem fez, quando, quais campos mudaram e a ficha antes e depois. É auditoria de dado sensível (LGPD). |
+| Trigger 2 | [`trg_ficha_sem_deficiencia`](db/schema.sql#L769) + [`fn_trg_ficha_sem_deficiencia`](db/schema.sql#L753) | Se a ficha deixa de ter `tem_deficiencia = 'sim'`, remove os tipos de deficiência ligados a ela. Mantém a ficha coerente sem depender de quem edita lembrar disso. |
+
+### Etapa 06 · Interface funcional com dashboard (versão final)
+
+| Requisito | Onde | O que faz no projeto |
+|---|---|---|
+| CRUD em pelo menos 4 tabelas | Página **Banco de Dados** ([`banco_de_dados.py`](app/paginas/banco_de_dados.py)), abas **Equipes** (`equipe`), **Unidades de saúde** (`unidade_saude`), **Tipos de deficiência** (`tipo_deficiencia`) e **Fichas de cadastro** (`ficha_cadastro`) | Inserir, consultar, alterar e excluir. A ficha grava também `cidadao` e `ficha_deficiencia` na mesma transação. Quando o banco recusa (CHECK, UNIQUE, `ON DELETE RESTRICT`), o motivo aparece na tela. |
+| Executar/ver efeitos das funções, procedimentos e triggers | Aba **Funções, procedimentos e triggers** | `fn_estado_marcador`: testar valores (inclusive o erro de marcador inválido) e ver a função aplicada às fichas do distrito. `fn_indice_completude`: valor da função ao lado do valor gravado, por quadrimestre. `pr_recalcular_indicadores` e `pr_agendar_apoio`: botão `CALL`, com o antes/depois, os avisos do banco (`RAISE NOTICE`) e a agenda em gráfico. Triggers: demonstração numa transação desfeita no fim (mostra os tipos de deficiência removidos e a linha do log) e o log real das alterações feitas na aba Fichas. |
+| Consultas e visões das Etapas 03 e 04 na interface, com filtros e parâmetros | Aba **Consultas e gráficos**, grupos *Etapa 03*, *Etapa 04* e *Visões*; as visões também estão na aba **Tabelas e visões** | 7 consultas da Etapa 03 (ranking das equipes críticas, estado do registro por distrito, evolução do índice, concentração da população por bairro, equipes que entraram na lista crítica, possível erro de raça/cor, esperado × registrado), as 4 da Etapa 04 e as 2 visões. Filtros: quadrimestre e distrito na barra lateral, mais grupo populacional, tipos de deficiência e limite em pontos percentuais, conforme a consulta. |
+| Apresentação visual clara de cada consulta/visão | Mesma aba | Cada consulta tem a pergunta que responde, as técnicas SQL usadas, um gráfico próprio (barras, linhas, pontos), a tabela do resultado e o SQL executado. |
+| Dashboard sobre os dados do banco | Página **Dashboard** ([`dashboard.py`](app/paginas/dashboard.py)) | Toda a página é SQL executado na hora no PostgreSQL. As estatísticas são calculadas **pelo banco** (`AVG`, `PERCENTILE_CONT`, `MODE`, `VAR_SAMP`, `STDDEV_SAMP`, `CORR`, `REGR_SLOPE`); o Python só desenha. Cada bloco tem o SQL executado. |
+| Indicadores resumidos | Dashboard, topo | Total de fichas, pessoas cadastradas, equipes e unidades, idade média, índice de completude médio e % de equipes críticas (com a variação para o quadrimestre anterior), % de N/I em orientação sexual, % de pessoas com deficiência. |
+| Média, mediana, moda, variância e desvio padrão | Dashboard, bloco "Medidas de posição e dispersão" | Para 4 variáveis à escolha (índice das equipes, fichas por equipe, risco previsto, idade das pessoas): média, mediana, moda, variância, desvio padrão, coeficiente de variação, mínimo, quartis e máximo. |
+| Pelo menos 6 gráficos dinâmicos | Dashboard, 8 gráficos | 1 **linha**: tendência do índice por distrito ao longo dos quadrimestres (média ou mediana). 2 **histograma**: distribuição do índice, com média, mediana e moda marcadas. 3 **boxplot**: dispersão do índice dentro de cada distrito (quartis, média, desvio). 4 **barras empilhadas**: frequência de Preenchido / Recusou / N/I por marcador. 5 **pizza (rosca)**: composição por raça/cor, com a fatia de N/I. 6 **dispersão**: correlação de Pearson entre volume de fichas e índice, com a reta de regressão. 7 **barras + linha**: fichas por mês com média móvel de 3 meses (tendência temporal). 8 **pirâmide etária**: distribuição por faixa etária e sexo. |
+| Visualizações interativas (períodos, categorias, filtros) | Dashboard, barra lateral e gráficos | Intervalo de quadrimestres e distritos (valem para a página inteira), escolha da variável e da medida, legenda clicável para destacar um distrito, zoom no gráfico de dispersão, tooltip em todos os gráficos. |
+| Extra: formulário para as equipes | Página **Formulário da equipe** ([`formulario.py`](app/paginas/formulario.py)) | A equipe escolhe distrito → unidade → equipe e preenche a ficha. Os campos aparecem conforme as respostas, e o formulário não deixa enviar com marcador em branco (N/I). Grava cidadão, ficha e tipos de deficiência numa transação e devolve o número da ficha. Mostra na hora o índice da equipe (`fn_indice_completude`) e as últimas fichas com o estado de cada marcador (`fn_estado_marcador`). |
+
+### Interface e regras de integração
+
+| Requisito | Como o projeto atende |
+|---|---|
+| Aplicação web integrada ao banco | App web em Streamlit, publicado (link no topo), ligado ao PostgreSQL (banco local ou na nuvem). |
+| Comandos explícitos no backend | Todo comando é SQL escrito à mão e enviado pelo **psycopg**, o driver do PostgreSQL para Python (papel equivalente ao JDBC). As telas mostram o SQL exato que o banco recebeu. |
+| Proibido ORM ou camada de abstração do banco | Nenhum ORM (SQLAlchemy, Django ORM etc.). INSERT, UPDATE, DELETE e SELECT são strings SQL com parâmetros. Os parâmetros evitam SQL injection; nomes de tabela, que não podem ser parâmetros, entram como identificadores seguros vindos de uma lista fixa. |
+
+### Requisitos não funcionais
+
+| Requisito | Como o projeto atende |
+|---|---|
+| Identificadores significativos | Tabelas, colunas e objetos com nomes do domínio (`ficha_cadastro`, `indice_completude`, `deseja_informar_os`, `fn_estado_marcador`, `pr_agendar_apoio`, `trg_ficha_log`); restrições nomeadas pelo tipo (`pk_`, `fk_`, `ck_`, `uq_`, `ix_`). |
+| Código organizado, documentado e explicado | Cada arquivo começa com um cabeçalho dizendo o que faz. Cada objeto do `schema.sql` tem comentário com a justificativa semântica. Cada consulta tem a pergunta que responde e as técnicas usadas, mostradas também na tela. |
+
 ## Estrutura
 
 ```
@@ -71,20 +143,6 @@ streamlit run app/app.py                                   # página "Banco de D
 | `app/paginas/banco_de_dados.py` | Interface: consultas com gráficos, tabelas, cadastro de equipes e fichas, importação de arquivo |
 
 `ficha_cadastro.data_envio` é quando a equipe enviou a ficha; `data_entrada` é quando ela entrou no banco (preenchida pelo próprio banco). A aba "Importar arquivo" mostra o histórico de entradas.
-
-#### Versão final da interface (Banco de Dados · Etapa 06)
-
-Tudo roda no mesmo banco e no mesmo app. Mapa do enunciado:
-
-| Requisito | Onde está no app |
-|---|---|
-| CRUD em pelo menos 4 tabelas | Página **Banco de Dados**, abas **Equipes** (`equipe`), **Unidades de saúde** (`unidade_saude`), **Tipos de deficiência** (`tipo_deficiencia`) e **Fichas de cadastro** (`ficha_cadastro`, que grava também `cidadao` e `ficha_deficiencia` na mesma transação). Inserir, alterar e excluir; as recusas do banco (CHECK, UNIQUE, ON DELETE RESTRICT) aparecem na tela |
-| Funções, procedimentos e triggers (Etapa 05) | Aba **Funções, procedimentos e triggers**: `fn_estado_marcador` (testar valores, inclusive o erro de marcador inválido, e ver a função aplicada às fichas), `fn_indice_completude` (função × valor gravado, por quadrimestre), `CALL pr_recalcular_indicadores` (antes/depois + RAISE NOTICE), `CALL pr_agendar_apoio` (agenda do apoiador em gráfico), triggers `trg_ficha_log` e `trg_ficha_sem_deficiencia` (demonstração em transação desfeita + log real das alterações feitas na aba Fichas) |
-| Consultas e visões (Etapas 03 e 04) com filtros e gráficos | Aba **Consultas e gráficos**, grupos *Etapa 03* (7 consultas), *Etapa 04* (anti join, full outer join, 2 com subconsultas) e *Visões* (`vw_indicador_territorio`, `vw_ficha_marcadores`). Filtros: quadrimestre e distrito na barra lateral, mais grupo, tipos de deficiência e limite em pp conforme a consulta. Cada uma mostra gráfico, tabela e o SQL executado. As visões também aparecem na aba **Tabelas e visões** |
-| Dashboard estatístico sobre os dados do banco | Página **Dashboard** (`app/paginas/dashboard.py`): 8 indicadores resumidos com variação para o quadrimestre anterior; média, mediana, moda, variância, desvio padrão, coeficiente de variação e quartis de 4 variáveis, **calculados pelo PostgreSQL** (AVG, PERCENTILE_CONT, MODE, VAR_SAMP, STDDEV_SAMP); 8 gráficos: tendência temporal (linha), histograma com média/mediana/moda, dispersão por distrito (boxplot), frequência do estado do registro (barras empilhadas), composição por raça/cor (rosca), correlação fichas × índice com reta de regressão (CORR, REGR_SLOPE), série mensal com média móvel (janela) e pirâmide etária. Filtros de período e distritos valem para a página inteira; legendas clicáveis e zoom nos gráficos |
-| Extra: formulário para as equipes, conectado ao banco | Página **Formulário da equipe** (`app/paginas/formulario.py`): a equipe escolhe distrito → unidade → equipe e preenche a ficha (identificação + marcadores de equidade). Campos aparecem conforme as respostas (criança não vê orientação/identidade; tipos de deficiência só com "sim"); raça/cor, deficiência e "deseja informar?" são obrigatórios (o formulário não gera N/I); confere tudo antes de enviar; grava cidadão, ficha e tipos numa transação e devolve o número da ficha. Mostra o índice da equipe no quadrimestre atual calculado na hora por `fn_indice_completude` e as últimas fichas com `fn_estado_marcador` |
-
-Consultas novas da Etapa 04 ficaram em `db/consultas.py` (fonte única), parametrizadas pelo quadrimestre e distrito da tela.
 
 #### Pipeline automatizada
 
