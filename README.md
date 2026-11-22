@@ -4,6 +4,10 @@ Pipeline de dados e Machine Learning para transformar os cadastros do PEC/e-SUS 
 
 Projeto 3 (Dados) + Machine Learning I · CESAR School · 2026.2 · Cliente: Secretaria de Saúde do Recife
 
+## 🔗 [Abrir o app publicado (Painel, Dashboard, Banco de Dados e Formulário)](https://painel-equidade-recife-wk2ayj4vdi6qsjuuxxkc4e.streamlit.app/)
+
+**https://painel-equidade-recife-wk2ayj4vdi6qsjuuxxkc4e.streamlit.app/**
+
 > **Base de dados sintética.** A Secretaria não liberou os dados reais do PEC. O projeto usa uma base gerada por código, no formato do PEC (ver `docs/contrato_dados.md`). Quando a extração real existir nesse formato, o pipeline roda sem mudanças.
 
 ## Estrutura
@@ -91,15 +95,6 @@ arquivo (CSV/Excel) ─► validação ─► fichas no banco (data_entrada) ─
 ```
 
 Roda sozinha depois de cada importação na aba "Importar arquivo"; também pelo botão da aba "Pipeline" ou por `python src/pipeline.py`. Cada execução fica registrada em `execucao_pipeline` (tempo, F1 do modelo contra a persistência, equipes em risco). O Painel e as Estatísticas leem do banco; sem banco configurado, leem a cópia estática de `app/dados/` (e o risco vira a baseline de persistência).
-
-#### Banco na nuvem (Neon)
-
-1. Crie um projeto no [Neon](https://neon.tech) (PostgreSQL 17, região São Paulo) e copie a string de conexão **direta** (sem `-pooler`).
-2. Grave em `.streamlit/secrets.toml` (fica fora do GitHub): `DATABASE_URL = "postgresql://...neon.tech/neondb?sslmode=require"`
-3. `bash db/migrar_para_neon.sh`: copia o banco local e confere as contagens.
-4. No Streamlit Cloud: *Settings → Secrets*, a mesma linha do passo 2. A página Banco de Dados passa a funcionar no app publicado.
-
-A página Banco de Dados usa a variável `DATABASE_URL` ou o segredo `DATABASE_URL` do Streamlit. Sem nenhum dos dois, mostra um aviso e não toca em banco nenhum.
 
 ## Documentação
 
