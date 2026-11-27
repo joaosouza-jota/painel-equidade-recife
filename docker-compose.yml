@@ -1,0 +1,24 @@
+# Servidor do MLflow para os experimentos (src/modelos.py). Opcional: sem Docker, o script grava em ./mlflow.db.
+#
+#   docker compose up -d
+#   MLFLOW_TRACKING_URI=http://127.0.0.1:5001 python src/modelos.py
+#   abrir http://127.0.0.1:5001
+#
+# Porta 5001 porque no macOS a 5000 é do AirPlay.
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.18.0
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+      --allowed-hosts "*"
+    ports:
+      - "5001:5000"
+    volumes:
+      - mlflow_dados:/mlflow
+
+volumes:
+  mlflow_dados:

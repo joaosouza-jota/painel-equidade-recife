@@ -1,0 +1,6 @@
+modelo,f1,recall,precisao,roc_auc,equipes_alertadas,criticas_no_teste,janela_f1,janela_f1_desvio,hiperparametros,f1_validacao,empate_tecnico,escolhido
+Persistência (baseline),0.833,0.833,0.833,,192,192,0.83,0.01,,,False,False
+Regressão logística (pipeline),0.852,0.885,0.821,0.97,207,192,0.844,0.012,,,True,True
+KNN,0.83,0.828,0.832,0.957,191,192,0.832,0.022,"{'n_neighbors': 15, 'weights': 'distance'}",0.811,False,False
+Árvore de decisão,0.83,0.839,0.821,0.963,196,192,0.807,0.03,"{'max_depth': 3, 'min_samples_leaf': 50}",0.792,False,False
+Random Forest,0.851,0.891,0.814,0.97,210,192,0.838,0.013,"{'max_depth': 5, 'min_samples_leaf': 1}",0.815,True,False
