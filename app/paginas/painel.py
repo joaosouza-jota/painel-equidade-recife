@@ -21,7 +21,9 @@ import pydeck as pdk
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from dados_painel import carregar, risco  # noqa: E402
+from quadrimestres import esta_fechado, fim_do_quadrimestre  # noqa: E402
 
 
 AZUL, LARANJA, VERDE_AGUA, AMARELO = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
@@ -56,6 +58,9 @@ AJUDA_RISCO = ("Modelo de ML (regressão logística) treinado pela pipeline: equ
                "entre as 25% piores no próximo quadrimestre." if ORIGEM == "banco"
                else "Baseline de persistência (cópia estática, sem modelo): equipes críticas agora.")
 QUADRIMESTRES = sorted(resumo["quadrimestre"].unique())
+# O painel abre no último quadrimestre FECHADO: um quadrimestre em andamento tem índice parcial e não tem
+# previsão de risco (a pipeline só usa quadrimestres fechados).
+FECHADOS = [q for q in QUADRIMESTRES if esta_fechado(q)]
 
 
 def proximo(q):
@@ -73,9 +78,19 @@ with st.sidebar:
         "Perfil de acesso", ["Coordenação", "Gestão de Distrito", "Equipe de Saúde"],
         help="No produto, o perfil vem do login da Secretaria e cada perfil só enxerga o seu recorte.",
     )
-    quad = st.select_slider("Quadrimestre", QUADRIMESTRES, value=QUADRIMESTRES[-1])
+    quad = st.select_slider("Quadrimestre", QUADRIMESTRES, value=(FECHADOS or QUADRIMESTRES)[-1])
 
 res_q = resumo[resumo["quadrimestre"] == quad]
+ABERTO = not esta_fechado(quad)
+if ABERTO:
+    st.warning(f"Quadrimestre {quad} em andamento (fecha em {fim_do_quadrimestre(quad):%d/%m/%Y}): o índice é "
+               "parcial, a marcação de críticas compara equipes com dados incompletos e ainda não há previsão "
+               "de risco.")
+
+
+def em_risco(r):
+    """Quantas equipes estão em risco no próximo quadrimestre ("—" se o quadrimestre ainda está aberto)."""
+    return "—" if ABERTO else int((r["risco"] >= LIMIAR_RISCO).sum())
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +112,7 @@ def tela_coordenacao():
     c1.metric("Equipes", len(r))
     c2.metric("Índice de completude (mediana)", f"{r['indice_completude'].median():.0f} / 100")
     c3.metric("Equipes críticas agora", int(r["critica"].sum()))
-    c4.metric(f"Em risco em {proximo(quad)}", int((r["risco"] >= LIMIAR_RISCO).sum()), help=AJUDA_RISCO)
+    c4.metric(f"Em risco em {proximo(quad)}", em_risco(r), help=AJUDA_RISCO)
 
     aba_pop, aba_qual = st.tabs(["📍 Onde está a população", "✅ Qualidade do registro"])
 
@@ -184,7 +199,7 @@ def tela_distrito():
     c1.metric("Equipes", len(r))
     c2.metric("Índice (mediana)", f"{r['indice_completude'].median():.0f}", f"{r['indice_completude'].median() - rede:+.1f} vs. rede")
     c3.metric("Críticas agora", int(r["critica"].sum()))
-    c4.metric(f"Em risco em {proximo(quad)}", int((r["risco"] >= LIMIAR_RISCO).sum()), help=AJUDA_RISCO)
+    c4.metric(f"Em risco em {proximo(quad)}", em_risco(r), help=AJUDA_RISCO)
 
     st.subheader("Ranking das equipes · da mais crítica para a melhor")
     tabela = r
@@ -225,7 +240,8 @@ def tela_equipe():
         st.metric("Nota de qualidade do cadastro", f"{e['indice_completude']:.0f} / 100",
                   f"{e['indice_completude'] - media_ds:+.1f} vs. mediana do distrito")
         st.markdown(f"Status: **{e['status']}**")
-        st.markdown(f"Risco em {proximo(quad)}: **{pct(e['risco'])}**" + (" ⚠️" if e["risco"] >= LIMIAR_RISCO else ""),
+        st.markdown(f"Risco em {proximo(quad)}: **{'—' if ABERTO else pct(e['risco'])}**"
+                    + (" ⚠️" if not ABERTO and e["risco"] >= LIMIAR_RISCO else ""),
                     help=AJUDA_RISCO)
     with col_campos:
         st.markdown("**Completude por campo**")

@@ -32,6 +32,7 @@ import pandas as pd
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "src"))
 from features import ALVO, VARIAVEIS, base_do_resumo  # noqa: E402
+from quadrimestres import esta_fechado, fim_do_quadrimestre  # noqa: E402,F401
 
 MODELO = "regressão logística"
 LIMIAR = 0.5                 # risco >= 0,5 = equipe em risco no próximo quadrimestre
@@ -57,9 +58,16 @@ def novo_modelo():
     return make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000))
 
 
-def treinar_e_prever(resumo):
-    """Devolve (previsões por ine x quadrimestre, métricas da avaliação temporal)."""
+def treinar_e_prever(resumo, hoje=None):
+    """Devolve (previsões por ine x quadrimestre, métricas da avaliação temporal).
+
+    Só usa quadrimestres fechados (src/quadrimestres.py). Um quadrimestre em andamento não entra nem no
+    treino nem na previsão: antes desta regra, importar 3 fichas de setembro de 2026 fazia o 2026.3 virar
+    "o último quadrimestre" e as equipes em risco caíam de 98 para 0.
+    """
     from sklearn.metrics import f1_score
+
+    resumo = resumo[[esta_fechado(q, hoje) for q in resumo["quadrimestre"]]]
 
     base = base_do_resumo(resumo)
     X = base[VARIAVEIS].fillna(0)
