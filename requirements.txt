@@ -10,3 +10,4 @@ pydeck
 scipy
 psycopg[binary]
 openpyxl
+pytest
