@@ -89,6 +89,7 @@ docs/        contrato de dados e arquitetura
 src/         código do pipeline
 db/          banco PostgreSQL: esquema, carga e consultas
 notebooks/   análise exploratória, experimentos e base proxy (Inferência)
+docker-compose.yml   servidor do MLflow para os experimentos (opcional)
 app/         app Streamlit: Painel + Banco de Dados
 data/        dados gerados (fora do git)
 ```
@@ -163,14 +164,31 @@ Roda sozinha depois de cada importação na aba "Importar arquivo"; também pelo
 | `notebooks/01_eda.ipynb` | Análise exploratória: 7 perguntas, 7 gráficos |
 | `notebooks/02_baseline.ipynb` | Problema supervisionado, divisão temporal treino/teste e baselines |
 | `notebooks/03_base_proxy_distritos.ipynb` | Inferência Estatística: base proxy de orientação sexual e identidade de gênero por distrito, validada com testes |
+| `notebooks/04_modelos.ipynb` | Resultado do modelo: comparação com a persistência e alternativas, limiar, alvo relativo e limites dos dados sintéticos |
+| `docs/handoff_ml.md` | O que foi feito no modelo para o SR2, como reproduzir, decisões e pendências |
 
-## Resultado atual (S06 · 26/09/2026)
+## Resultado atual do modelo (SR2 · 27/11/2026)
 
-| Baseline | Recall (críticas encontradas) | F1 |
-|---|---|---|
-| Sempre "não crítica" | 0,00 | 0,00 |
-| Sorteio de 25% | 0,29 | 0,29 |
-| **Persistência** (quem é crítica continua crítica) | **0,83** | **0,83** |
-| Média histórica | 0,79 | 0,79 |
+Detalhes em [`notebooks/04_modelos.ipynb`](notebooks/04_modelos.ipynb); números gerados por `python src/modelos.py` com **os mesmos dados, variáveis, limiar e divisão temporal da pipeline**, por isso o F1 é o mesmo da aba *Pipeline* do app. Teste: alvos de 2026.1 e 2026.2 (768 equipes x quadrimestre, 192 críticas).
 
-A persistência é a régua que os modelos da Sprint 1 precisam superar.
+| Modelo | F1 | Recall | Precisão | F1 na janela móvel |
+|---|---|---|---|---|
+| Persistência (quem é crítica continua crítica) | 0,833 | 0,833 | 0,833 | 0,830 |
+| **Regressão logística (modelo da pipeline)** | **0,852** | **0,885** | 0,821 | **0,844** |
+| Random Forest (GridSearch) | 0,851 | 0,891 | 0,814 | 0,838 |
+| KNN (GridSearch) | 0,830 | 0,828 | 0,832 | 0,832 |
+| Árvore de decisão (GridSearch) | 0,830 | 0,839 | 0,821 | 0,807 |
+
+- **Modelo x persistência:** a regressão logística encontra 170 das 192 equipes que ficaram críticas (a persistência, 160), com 15 alertas a mais. O ganho é pequeno; o valor está em antecipar equipes que ainda não são críticas, o que a persistência nunca faz.
+- **Alternativas:** hiperparâmetros por `GridSearchCV` com validação cruzada **temporal** (treina no passado, valida no quadrimestre seguinte). A árvore fica abaixo da persistência; KNN fica no nível dela; a random forest empata com a regressão logística (dentro de 1 desvio padrão na janela móvel). No empate fica o modelo mais simples: **a regressão logística continua na pipeline**.
+- **Limiar de 0,5:** na validação temporal, o F1 fica entre 0,81 e 0,82 em todo o intervalo de 0,35 a 0,50, então o resultado não depende de ajuste fino. 0,5 quer dizer "mais provável ficar crítica do que não" e mantém os alertas perto do número real de críticas (207 para 192). Abaixo de 0,35 os alertas crescem rápido (282 em 0,20); acima de 0,55 o recall cai.
+- **Alvo relativo (25% piores) x meta absoluta:** com uma meta absoluta (índice abaixo de 50), a fila de críticas iria de 16% para 26% das equipes no período. O painel serve para priorizar um apoio de capacidade fixa por distrito, por isso o alvo é uma ordenação. Limitação assumida: sempre haverá 25% de críticas, mesmo se a rede melhorar; a evolução da rede é medida pelo índice de completude, que é absoluto.
+- **Dados sintéticos:** o gerador cria cada equipe com um nível próprio que muda devagar (média da equipe + 0,6 × desvio anterior). A persistência alta (F1 de 0,73 a 0,84, subindo no tempo) vem em boa parte dessa regra. Os números valem para esta base; o que se leva para os dados reais é o método.
+- **MLflow:** cada execução de `src/modelos.py` fica registrada no experimento `risco-equipe-critica` (um run por modelo, um por combinação do GridSearch, a decisão na tag `decisao`), com cópia versionada em `notebooks/resultados/mlflow_runs.csv`. A pipeline do app não depende do MLflow: ela registra o F1 de cada execução em `execucao_pipeline`.
+
+```bash
+pip install -r requirements-ml.txt
+python src/modelos.py                    # compara, grava notebooks/resultados/ e registra no MLflow (./mlflow.db)
+mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
+# ou com Docker: docker compose up -d  e  MLFLOW_TRACKING_URI=http://127.0.0.1:5001 python src/modelos.py
+```

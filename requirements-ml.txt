@@ -1,0 +1,3 @@
+# Só para os experimentos de ML (src/modelos.py). O app do Streamlit Cloud usa requirements.txt e não precisa disto.
+-r requirements.txt
+mlflow

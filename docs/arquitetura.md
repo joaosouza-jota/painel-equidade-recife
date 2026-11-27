@@ -24,7 +24,7 @@ flowchart LR
     end
     subgraph E4["4 · Modelo"]
         D1["Divisão temporal + baselines ✅<br/>src/baseline.py"]
-        D2["KNN, árvore, regressão 🔜 Sprint 1<br/>validação cruzada 🔜 Sprint 2<br/>MLflow, Docker, MinIO 🔜 Sprint 4"]
+        D2["KNN, árvore, regressão, random forest ✅<br/>validação cruzada temporal ✅<br/>MLflow, Docker ✅ · MinIO 🔜<br/>src/modelos.py"]
     end
     subgraph E5["5 · Painel ✅ protótipo"]
         F["Streamlit: Coordenação,<br/>Distrito, Equipe<br/>app/app.py"]
@@ -73,7 +73,7 @@ flowchart LR
 | ML | scikit-learn | Modelos da disciplina (KNN, árvore, regressão) e métricas |
 | Análise | Jupyter + matplotlib | Notebooks executados de ponta a ponta, com saídas gravadas |
 | Painel | Streamlit + Altair + pydeck | Painel web interativo em Python, com mapa e gráficos com tooltip |
-| Experimentos 🔜 | MLflow, Docker, MinIO | Registro de experimentos e reprodutibilidade (Sprint 4) |
+| Experimentos | MLflow (+ Docker); MinIO 🔜 | Registro de experimentos e reprodutibilidade: `src/modelos.py` e `docker-compose.yml` |
 
 ## Como rodar tudo do zero
 

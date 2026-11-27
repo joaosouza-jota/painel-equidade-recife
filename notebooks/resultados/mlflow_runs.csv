@@ -1,0 +1,28 @@
+runName,tipo,decisao,run_id,parentRunId,criticas_no_teste,equipes_alertadas,f1,f1_validacao,f1_validacao_desvio,f1_validacao_media,janela_f1,janela_f1_desvio,precisao,recall,roc_auc,limiar,max_depth,min_samples_leaf,modelo,n_neighbors,quads_teste,regra,weights
+"Random Forest · {'max_depth': None, 'min_samples_leaf': 20}",combinacao,,1fb163baa2ef4e1295f69b164fb7a97a,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.008,0.8038,,,,,,,None,20,,,,,
+"Random Forest · {'max_depth': None, 'min_samples_leaf': 1}",combinacao,,2e0efcdc95be4ca8a581a5e20d2a658d,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.0024,0.7899,,,,,,,None,1,,,,,
+"Random Forest · {'max_depth': 10, 'min_samples_leaf': 20}",combinacao,,7ff033b3309e4769929fd8477799bfc0,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.008,0.8038,,,,,,,10,20,,,,,
+"Random Forest · {'max_depth': 10, 'min_samples_leaf': 1}",combinacao,,a0ca8228892b412d89ab4f1809b00358,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.01,0.8038,,,,,,,10,1,,,,,
+"Random Forest · {'max_depth': 5, 'min_samples_leaf': 20}",combinacao,,3128da5cd20d4b40961ccf768b726aa0,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.0103,0.7997,,,,,,,5,20,,,,,
+"Random Forest · {'max_depth': 5, 'min_samples_leaf': 1}",combinacao,,8993d8c80e5440e7bbce388d7491ea07,7aa4fbfe873041c2a5390f83aed49c73,,,,,0.0046,0.8149,,,,,,,5,1,,,,,
+Random Forest,modelo,,7aa4fbfe873041c2a5390f83aed49c73,9b66310b190747488a15cea87e5fe7b0,192.0,210.0,0.8507,0.8149,,,0.8377,0.0134,0.8143,0.8906,0.9698,0.5,5,1,,,2,,
+"Árvore de decisão · {'max_depth': 8, 'min_samples_leaf': 50}",combinacao,,0244d3f48de94b6e8af33302615d60c6,afacb9da663c40d08e99f58a6b626765,,,,,0.0243,0.792,,,,,,,8,50,,,,,
+"Árvore de decisão · {'max_depth': 8, 'min_samples_leaf': 20}",combinacao,,d79e543b3ce14f9b8bc7a23fafd67b41,afacb9da663c40d08e99f58a6b626765,,,,,0.0241,0.7847,,,,,,,8,20,,,,,
+"Árvore de decisão · {'max_depth': 8, 'min_samples_leaf': 1}",combinacao,,d95638166cf34f4a9cb513e9e2f17334,afacb9da663c40d08e99f58a6b626765,,,,,0.0269,0.7176,,,,,,,8,1,,,,,
+"Árvore de decisão · {'max_depth': 5, 'min_samples_leaf': 50}",combinacao,,20625938adb649e0a66aa02496712c33,afacb9da663c40d08e99f58a6b626765,,,,,0.0243,0.792,,,,,,,5,50,,,,,
+"Árvore de decisão · {'max_depth': 5, 'min_samples_leaf': 20}",combinacao,,1f215aaa59e440b7bf49025d33984455,afacb9da663c40d08e99f58a6b626765,,,,,0.0241,0.7847,,,,,,,5,20,,,,,
+"Árvore de decisão · {'max_depth': 5, 'min_samples_leaf': 1}",combinacao,,9acbd0c062a343a692f9464ade9e4b8e,afacb9da663c40d08e99f58a6b626765,,,,,0.0162,0.7562,,,,,,,5,1,,,,,
+"Árvore de decisão · {'max_depth': 3, 'min_samples_leaf': 50}",combinacao,,0fe8c40de8c94c72ae13a8dffcba9e94,afacb9da663c40d08e99f58a6b626765,,,,,0.0243,0.792,,,,,,,3,50,,,,,
+"Árvore de decisão · {'max_depth': 3, 'min_samples_leaf': 20}",combinacao,,3322bb8eefac4f7095e151204395cb05,afacb9da663c40d08e99f58a6b626765,,,,,0.0307,0.7807,,,,,,,3,20,,,,,
+"Árvore de decisão · {'max_depth': 3, 'min_samples_leaf': 1}",combinacao,,40998a4841844c6bba6cc3ce8270ba2e,afacb9da663c40d08e99f58a6b626765,,,,,0.0272,0.7772,,,,,,,3,1,,,,,
+Árvore de decisão,modelo,,afacb9da663c40d08e99f58a6b626765,9b66310b190747488a15cea87e5fe7b0,192.0,196.0,0.8299,0.792,,,0.8073,0.0298,0.8214,0.8385,0.9625,0.5,3,50,,,2,,
+"KNN · {'n_neighbors': 51, 'weights': 'distance'}",combinacao,,2e198b59d87f4b0799da03d4909bdc7a,5474112520564caa88ea0a7de30e4330,,,,,0.0223,0.8031,,,,,,,,,,51,,,distance
+"KNN · {'n_neighbors': 51, 'weights': 'uniform'}",combinacao,,3e03f72730be4f2dbbfb5d9f8ebca39c,5474112520564caa88ea0a7de30e4330,,,,,0.0245,0.7946,,,,,,,,,,51,,,uniform
+"KNN · {'n_neighbors': 31, 'weights': 'distance'}",combinacao,,825d22dc25424fcd9b3b62c428481404,5474112520564caa88ea0a7de30e4330,,,,,0.0171,0.802,,,,,,,,,,31,,,distance
+"KNN · {'n_neighbors': 31, 'weights': 'uniform'}",combinacao,,e5783d3db58547738b438ca043b5cb9a,5474112520564caa88ea0a7de30e4330,,,,,0.0183,0.8009,,,,,,,,,,31,,,uniform
+"KNN · {'n_neighbors': 15, 'weights': 'distance'}",combinacao,,2b93cd4d97414a87b8fd534ec9f7eda3,5474112520564caa88ea0a7de30e4330,,,,,0.0115,0.8115,,,,,,,,,,15,,,distance
+"KNN · {'n_neighbors': 15, 'weights': 'uniform'}",combinacao,,88ec1dd4f99a44eaaca060300615e99b,5474112520564caa88ea0a7de30e4330,,,,,0.0136,0.8094,,,,,,,,,,15,,,uniform
+KNN,modelo,,5474112520564caa88ea0a7de30e4330,9b66310b190747488a15cea87e5fe7b0,192.0,191.0,0.8303,0.8115,,,0.8317,0.0217,0.8325,0.8281,0.9574,0.5,,,,15,2,,distance
+Regressão logística (pipeline),modelo,,b5a6625cc0bb4949b88fbd953f0b4c31,9b66310b190747488a15cea87e5fe7b0,192.0,207.0,0.8521,,,,0.8439,0.0119,0.8213,0.8854,0.9695,0.5,,,StandardScaler + LogisticRegression(max_iter=2000),,2,,
+Persistência (baseline),baseline,,70fd1001271d44b5ada0968072e44d24,9b66310b190747488a15cea87e5fe7b0,192.0,192.0,0.8333,,,,0.8299,0.0098,0.8333,0.8333,,0.5,,,,,2,crítica agora = crítica no próximo,
+comparacao,,Regressão logística (pipeline),9b66310b190747488a15cea87e5fe7b0,,,,,,,,,,,,,,,,,,,,
